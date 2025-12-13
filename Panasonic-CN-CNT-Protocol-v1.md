@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 0.8     | 2025-12-13 | -      | Bytes 31-33 are static identifiers (not telemetry), same values in all states |
 | 0.7     | 2025-12-13 | -      | Validated power formulas (R²>0.99), b30=current×5, confirmed outdoor unit measurement |
 | 0.6     | 2025-12-13 | -      | Corrected startup timing, byte 12 bit meanings, power formula rework, thermal baselines |
 | 0.5     | 2025-12-13 | -      | Byte 12 state machine (4 states), power formula issues, bytes 31-33 mux pattern |
@@ -134,34 +135,35 @@ TX: 70 0A 00 00 00 00 00 00 00 00 00 00 86
 | 28   | 0x22    | Outdoor unit power (low byte)    | ✅ Validated |
 | 29   | 0x00    | Outdoor unit power (high byte)   | ✅ Validated |
 | 30   | 0x01    | Compressor current × 5           | ✅ Validated (R²=0.9948) |
-| 31   | 0x80/C0 | Telemetry mux (cycles during operation) | ⚠️ See below |
-| 32   | 0x00/19 | Telemetry mux data               | ⚠️ See below |
-| 33   | 0x00/83 | Telemetry mux data               | ⚠️ See below |
+| 31   | 0x80/C0/C1 | Static identifier slot selector | ✅ See below |
+| 32   | 0x19/00/44 | Static identifier data          | ✅ See below |
+| 33   | 0x83/00/15 | Static identifier data          | ✅ See below |
 | 34   | 0x??    | Checksum                         | ✅ Confirmed |
 
-### Bytes 31-33: Multiplexed Telemetry
+### Bytes 31-33: Static Identifiers (Not Telemetry)
 
-> ⚠️ **THEORY - Multiplexed Data**: These bytes cycle through different patterns during operation. They do NOT appear to be simple status flags.
+> ✅ **CONFIRMED - Static Data**: These bytes appear to cycle but values are **constant** across all operational states. They are NOT dynamic telemetry.
 
-**Observed Patterns (3 distinct slots, cycling every ~15 seconds):**
-| b31  | b32  | b33  | Slot | Notes |
-|------|------|------|------|-------|
-| 0x80 | 0x19 | 0x83 | 1    | Values vary with operation |
-| 0xC0 | 0x00 | 0x00 | 2    | Often zeros |
-| 0xC1 | 0x44 | 0x15 | 3    | Values vary with operation |
+**Observed Patterns (static, cycling display only):**
+| b31  | b32  | b33  | Slot | Interpretation |
+|------|------|------|------|----------------|
+| 0x80 | 0x19 | 0x83 | 1    | Model/unit identifier (6531 or 33561) |
+| 0xC0 | 0x00 | 0x00 | 2    | Empty/reserved |
+| 0xC1 | 0x44 | 0x15 | 3    | Version/config identifier (17429 or 5444) |
 
-**Pattern Analysis:**
-- High nibble of b31 appears to be a **type selector**: 0x8_ vs 0xC_
-- Cycles through all 3 slots every ~15 seconds (3 poll intervals at 5s each)
-- Values in b32/b33 vary during operation - likely telemetry data
+**Analysis (24h data, all states):**
+- Values are **identical** in IDLE, START, RUN, and SHUTDOWN states
+- No correlation with power, current, or any operational metric (R²=0)
+- The "cycling" is just polling sampling different slots, not values changing
+- Slot 2 is always zeros - likely unused/reserved
 
-**Observations:**
-- Values cycle through patterns even during steady-state operation
-- Pattern suggests time-multiplexed telemetry (different data on each poll)
-- May contain: compressor frequency, fan RPM, refrigerant pressure, or other sensor data
-- Not suitable for simple status detection (too dynamic)
+**Likely Purpose:**
+- Unit identification or serial number fragments
+- Firmware/hardware version information
+- Model capability flags
+- NOT: compressor Hz, fan RPM, or any dynamic sensor data
 
-> ⚠️ **UNCONFIRMED**: The exact meaning of each mux slot is unknown. The 0x19 0x83 and 0x44 0x15 patterns could represent compressor Hz, fan RPM, or refrigerant pressure. If defrost status is transmitted via multiplexed data, all three slots need to be checked.
+✅ Confirmed static via 24h analysis across all operational states (2025-12-13)
 
 ---
 
@@ -528,10 +530,10 @@ Controller                               AC Unit
 - [x] Develop corrected formula → `total_watts = raw × 1.14` (R²=0.9943)
 - [x] Determine if CN-CNT measures outdoor unit only → Yes, ~88% of total power
 
-### Multiplexed Telemetry (MEDIUM PRIORITY)
-- [ ] Decode mux slot meanings (0x19 0x83, 0x44 0x15 patterns)
-- [ ] Determine if compressor Hz is in multiplexed data
-- [ ] Check if defrost status appears in any mux slot
+### Bytes 31-33 Identifiers (COMPLETED)
+- [x] ~~Decode mux slot meanings~~ → Static identifiers, not telemetry
+- [x] ~~Determine if compressor Hz is in multiplexed data~~ → No, values are constant
+- [x] ~~Check if defrost status appears in any mux slot~~ → No, same values in all states
 
 ### Unknown Bytes
 - [ ] Byte 8: Always 0x00?
@@ -547,7 +549,7 @@ Controller                               AC Unit
 - [x] Byte 18 = inlet temperature (confirmed via Zigbee)
 - [x] Byte 20 = humidity (confirmed via Zigbee)
 - [x] Byte 21 = byte 18 + 2°C (calculated display value)
-- [x] Bytes 31-33 = multiplexed telemetry with 3 slots, 15s cycle
+- [x] **Bytes 31-33 = static identifiers** (NOT telemetry - same values in all states)
 - [x] Thermal baselines documented (running: 35-37°C outflow, stopped: ~30°C)
 - [x] **Power formula validated** (R²=0.9943): `total_watts = (b28 + b29×256) × 1.14`
 - [x] **Current formula validated** (R²=0.9948): `amps = b30 / 5.0`
@@ -556,9 +558,10 @@ Controller                               AC Unit
 
 ### Open Questions
 1. ~~Why does CN-CNT report 34 when actual power is 7W?~~ → **ANSWERED**: Baseline constant, not real measurement
-2. What's in the multiplexed bytes (31-33)? Could be compressor Hz, fan RPM, refrigerant pressure?
+2. ~~What's in the multiplexed bytes (31-33)?~~ → **ANSWERED**: Static identifiers, not dynamic data
 3. ~~Byte 30 exact meaning?~~ → **ANSWERED**: Compressor current × 5 (validated R²=0.9948)
 4. What byte 12 value during defrost? Prediction: 0x44 (compressor on, fan off) or 0x50/0x54
+5. What do the static identifiers (31-33) represent? Model code? Serial? Firmware version?
 
 ---
 
