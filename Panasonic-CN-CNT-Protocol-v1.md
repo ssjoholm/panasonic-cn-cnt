@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 0.9     | 2025-12-13 | -      | Analyzed unknown bytes: 10 static, byte 13 variable (temp offset) |
 | 0.8     | 2025-12-13 | -      | Bytes 31-33 are static identifiers (not telemetry), same values in all states |
 | 0.7     | 2025-12-13 | -      | Validated power formulas (R²>0.99), b30=current×5, confirmed outdoor unit measurement |
 | 0.6     | 2025-12-13 | -      | Corrected startup timing, byte 12 bit meanings, power formula rework, thermal baselines |
@@ -112,26 +113,26 @@ TX: 70 0A 00 00 00 00 00 00 00 00 00 00 86
 | 5    | 0x40    | Fan speed                        | ✅ Confirmed (via Sensibo/IR) |
 | 6    | 0x5C    | Swing (V + H)                    | ✅ Confirmed (via Sensibo/IR) |
 | 7    | 0x00    | Preset / NanoE-X / EcoNavi       | ✅ Known    |
-| 8    | 0x00    | **?**                            | ❓ Unknown  |
-| 9    | 0x40    | **?**                            | ❓ Unknown  |
+| 8    | 0x00    | Reserved (always 0x00)           | ✅ Static   |
+| 9    | 0x40    | Unknown flag (always 0x40)       | ✅ Static   |
 | 10   | 0x00    | Eco mode                         | ✅ Known    |
-| 11   | 0x00    | **?**                            | ❓ Unknown  |
+| 11   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 12   | 0x40-4C | Operational status (state machine)| ✅ Confirmed |
-| 13   | 0x2C    | **?**                            | ❓ Unknown  |
-| 14   | 0x00    | **?**                            | ❓ Unknown  |
-| 15   | 0x00    | **?**                            | ❓ Unknown  |
-| 16   | 0x00    | **?**                            | ❓ Unknown  |
-| 17   | 0x00    | **?**                            | ❓ Unknown  |
+| 13   | 0x2B/2C | Temp offset? (target+3 or +4)    | ⚠️ Variable |
+| 14   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
+| 15   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
+| 16   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
+| 17   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 18   | 0x17    | Current/room temperature         | ✅ Confirmed (via Zigbee sensor at inlet) |
 | 19   | 0x03    | Outside temperature              | ✅ Confirmed (via Panasonic app) |
 | 20   | 0x1F    | Humidity %                       | ✅ Confirmed (via Zigbee sensor) |
 | 21   | 0x16    | Room/inlet temperature           | ✅ Confirmed (via Panasonic app) |
 | 22   | 0x03    | Outside temperature (alt)        | ✅ Confirmed |
 | 23   | 0xFF    | Marker                           | ✅ Known    |
-| 24   | 0x80    | **?**                            | ❓ Unknown  |
-| 25   | 0x80    | **?**                            | ❓ Unknown  |
+| 24   | 0x80    | Reserved/unsupported (always 0x80)| ✅ Static   |
+| 25   | 0x80    | Reserved/unsupported (always 0x80)| ✅ Static   |
 | 26   | 0xFF    | Marker                           | ✅ Known    |
-| 27   | 0x80    | **?**                            | ❓ Unknown  |
+| 27   | 0x80    | Reserved/unsupported (always 0x80)| ✅ Static   |
 | 28   | 0x22    | Outdoor unit power (low byte)    | ✅ Validated |
 | 29   | 0x00    | Outdoor unit power (high byte)   | ✅ Validated |
 | 30   | 0x01    | Compressor current × 5           | ✅ Validated (R²=0.9948) |
@@ -535,11 +536,12 @@ Controller                               AC Unit
 - [x] ~~Determine if compressor Hz is in multiplexed data~~ → No, values are constant
 - [x] ~~Check if defrost status appears in any mux slot~~ → No, same values in all states
 
-### Unknown Bytes
-- [ ] Byte 8: Always 0x00?
-- [ ] Byte 9: Seen as 0x40 - purpose?
-- [ ] Bytes 11-17: Static or changing?
-- [ ] Bytes 24, 25, 27: Status or unsupported markers?
+### Unknown Bytes (COMPLETED)
+- [x] Byte 8: Always 0x00 (reserved)
+- [x] Byte 9: Always 0x40 (unknown flag, static)
+- [x] Bytes 11, 14-17: Always 0x00 (reserved)
+- [x] Byte 13: Variable 0x2B/0x2C - related to target temp (target+3 or +4)
+- [x] Bytes 24, 25, 27: Always 0x80 (reserved/unsupported marker)
 
 ### Completed Investigations
 - [x] Byte 12 state machine (4 states: 0x40, 0x44, 0x48, 0x4C)
