@@ -327,12 +327,19 @@ These are multiplexed telemetry, not status flags:
 ```
 
 **Bit Interpretation:**
-| State | Bit 3 (Fan) | Bit 2 (Compressor) | Physical Meaning |
-|-------|-------------|--------------------| -----------------|
-| 0x48  | 1           | 0                  | Fan on, compressor off (pre-heat) |
-| 0x4C  | 1           | 1                  | Both on (running) |
-| 0x44  | 0           | 1                  | Compressor stopping, fan already off |
-| 0x40  | 0           | 0                  | Both off (idle) |
+| State | Bit 3 | Bit 2 | Observed Context |
+|-------|-------|-------|------------------|
+| 0x48  | 1     | 0     | Startup (fan pre-heat before compressor) |
+| 0x4C  | 1     | 1     | Running (full operation) |
+| 0x44  | 0     | 1     | Shutdown transition (brief, ~5 sec) |
+| 0x40  | 0     | 0     | Idle (stopped) |
+
+> ⚠️ **BIT MEANINGS UNCERTAIN**: The 0x44 state shows bit 3=0, bit 2=1. If bit 3=fan and bit 2=compressor, this would mean "fan off, compressor on" — but physically during normal shutdown, compressor stops first while fan runs to dissipate heat. Possible explanations:
+> - Bit meanings may be swapped (bit 3=compressor, bit 2=fan)
+> - 0x44 may represent a different condition than normal shutdown
+> - 0x44 pattern may match defrost mode (compressor on, fan off to prevent cold air)
+>
+> **Needs verification during defrost cycle** when we'd expect compressor on + fan off.
 
 **State Transitions Observed:**
 - **Startup**: 0x40 → 0x48 → 0x4C (idle → fan pre-heat → full operation)
