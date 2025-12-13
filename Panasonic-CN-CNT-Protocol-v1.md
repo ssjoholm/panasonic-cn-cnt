@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.0     | 2025-12-13 | -      | **MAJOR**: Discovered byte 12 = 0x00 (OFF state), complete state machine now 5 states |
 | 0.9     | 2025-12-13 | -      | Analyzed unknown bytes: 10 static, byte 13 variable (temp offset) |
 | 0.8     | 2025-12-13 | -      | Bytes 31-33 are static identifiers (not telemetry), same values in all states |
 | 0.7     | 2025-12-13 | -      | Validated power formulas (R²>0.99), b30=current×5, confirmed outdoor unit measurement |
@@ -117,7 +118,7 @@ TX: 70 0A 00 00 00 00 00 00 00 00 00 00 86
 | 9    | 0x40    | Unknown flag (always 0x40)       | ✅ Static   |
 | 10   | 0x00    | Eco mode                         | ✅ Known    |
 | 11   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
-| 12   | 0x40-4C | Operational status (state machine)| ✅ Confirmed |
+| 12   | 0x00-4C | Operational status (state machine)| ✅ Confirmed |
 | 13   | 0x2B/2C | Temp offset? (target+3 or +4)    | ⚠️ Variable |
 | 14   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 15   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
@@ -311,32 +312,37 @@ These are multiplexed telemetry, not status flags:
 
 | Value | Binary      | State                    | Status |
 |-------|-------------|--------------------------|--------|
-| 0x40  | 0100 0000   | Idle/stopped             | ✅ Confirmed |
+| 0x00  | 0000 0000   | **OFF** (unit powered off via mode) | ✅ Confirmed |
+| 0x40  | 0100 0000   | Idle (ON but waiting)    | ✅ Confirmed |
 | 0x44  | 0100 0100   | Shutdown transition      | ⚠️ Intermittent (see note) |
 | 0x48  | 0100 1000   | Startup (fan pre-heat)   | ✅ Confirmed |
 | 0x4C  | 0100 1100   | Running (full operation) | ✅ Confirmed |
+
+> ✅ **NEW DISCOVERY (v1.0)**: Byte 12 = 0x00 when unit is completely OFF. This is distinct from 0x40 (idle) - 0x00 means the unit is powered off via mode change, while 0x40 means the unit is ON but not actively heating/cooling.
 
 **Bit Layout:**
 ```
 0x4C = 0100 1100 - Running (fan + compressor)
 0x48 = 0100 1000 - Startup (fan only, pre-compressor)
 0x44 = 0100 0100 - Shutdown (compressor stopping)
-0x40 = 0100 0000 - Idle (stopped)
+0x40 = 0100 0000 - Idle (ON but waiting)
+0x00 = 0000 0000 - OFF (unit disabled via mode)
        ││││ ││││
        ││││ │└┴┴─ Bits 0-2: (always 0 in observed states)
        ││││ └──── Bit 3 (0x08): Fan active
        │││└────── Bit 2 (0x04): Compressor active
-       │└┴─────── Bits 4-6: (always 010 in observed states)
+       │└┴─────── Bits 4-6: State active flag (010 when ON)
        └───────── Bit 7: (always 0)
 ```
 
 **Bit Interpretation:**
-| State | Bit 3 | Bit 2 | Observed Context |
-|-------|-------|-------|------------------|
-| 0x48  | 1     | 0     | Startup (fan pre-heat before compressor) |
-| 0x4C  | 1     | 1     | Running (full operation) |
-| 0x44  | 0     | 1     | Shutdown transition (brief, ~5 sec) |
-| 0x40  | 0     | 0     | Idle (stopped) |
+| State | Bit 6 | Bit 3 | Bit 2 | Observed Context |
+|-------|-------|-------|-------|------------------|
+| 0x00  | 0     | 0     | 0     | Unit OFF (via mode change) |
+| 0x40  | 1     | 0     | 0     | Idle (ON but waiting) |
+| 0x48  | 1     | 1     | 0     | Startup (fan pre-heat before compressor) |
+| 0x4C  | 1     | 1     | 1     | Running (full operation) |
+| 0x44  | 1     | 0     | 1     | Shutdown transition (brief, ~5 sec) |
 
 > ⚠️ **BIT MEANINGS UNCERTAIN**: The 0x44 state shows bit 3=0, bit 2=1. If bit 3=fan and bit 2=compressor, this would mean "fan off, compressor on" — but physically during normal shutdown, compressor stops first while fan runs to dissipate heat. Possible explanations:
 > - Bit meanings may be swapped (bit 3=compressor, bit 2=fan)
@@ -346,13 +352,16 @@ These are multiplexed telemetry, not status flags:
 > **Needs verification during defrost cycle** when we'd expect compressor on + fan off.
 
 **State Transitions Observed:**
+- **Power ON**: 0x00 → 0x40 (OFF → idle, ~30 seconds delay)
 - **Startup**: 0x40 → 0x48 → 0x4C (idle → fan pre-heat → full operation)
 - **Shutdown**: 0x4C → 0x44 → 0x40 (running → transition → idle)
 - **Direct shutdown**: 0x4C → 0x40 (occurs ~50% of time, see note below)
+- **Power OFF**: 0x4C → 0x00 (running → OFF, immediate on mode change)
 
 **Power Correlation:**
 | State | Typical Power | Description |
 |-------|---------------|-------------|
+| 0x00  | ~7W (Shelly)  | Unit OFF (same standby as idle) |
 | 0x40  | ~7W (Shelly)  | Standby/idle |
 | 0x44  | ~7W (Shelly)  | Brief transition (~5 sec) |
 | 0x48  | ~92W          | Fan only (pre-compressor) |
@@ -367,7 +376,8 @@ These are multiplexed telemetry, not status flags:
 **0x44 Detection Note:**
 > ⚠️ The 0x44 shutdown state is **intermittent** - only ~50% of shutdown cycles show it. This is because 0x44 is a brief transition state (~5 seconds). With 5-second polling, we only catch it when timing aligns. Code should NOT rely on seeing 0x44 for shutdown detection - instead detect 0x4C → 0x40 transitions.
 
-✅ States 0x40, 0x48, 0x4C confirmed via live testing (2025-12-12/13)
+✅ States 0x00, 0x40, 0x48, 0x4C confirmed via live testing (2025-12-12/13)
+✅ State 0x00 (OFF) discovered via live testing with mode change (2025-12-13)
 ⚠️ State 0x44 confirmed but intermittently captured due to polling resolution
 
 > ⚠️ **UNCONFIRMED - Defrost Theory**: Other bit patterns (e.g., 0x50, 0x54) may indicate defrost/deicing mode. Prediction: defrost may show 0x44 (compressor on, fan off) or a new value. Defrost cycles have not been observed yet - needs cold weather testing.
@@ -544,8 +554,9 @@ Controller                               AC Unit
 - [x] Bytes 24, 25, 27: Always 0x80 (reserved/unsupported marker)
 
 ### Completed Investigations
-- [x] Byte 12 state machine (4 states: 0x40, 0x44, 0x48, 0x4C)
-- [x] Byte 12 bit meanings (bit 3 = fan, bit 2 = compressor) - needs defrost verification
+- [x] Byte 12 state machine (**5 states**: 0x00, 0x40, 0x44, 0x48, 0x4C)
+- [x] **NEW: 0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
+- [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor) - needs defrost verification
 - [x] Startup timing corrected (15-20 sec, not 3 min)
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
 - [x] Byte 18 = inlet temperature (confirmed via Zigbee)
