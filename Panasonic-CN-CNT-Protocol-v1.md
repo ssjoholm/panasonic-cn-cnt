@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 0.6     | 2025-12-13 | -      | Corrected startup timing, byte 12 bit meanings, power formula rework, thermal baselines |
 | 0.5     | 2025-12-13 | -      | Byte 12 state machine (4 states), power formula issues, bytes 31-33 mux pattern |
 | 0.4     | 2025-12-12 | -      | Confirmed settings bytes via Sensibo/IR, confirmed temps via Panasonic app, added serial params |
 | 0.3     | 2025-06-01 | -      | Added ODS documentation, complete byte map, swing matrix, TODO section |
@@ -141,19 +142,25 @@ TX: 70 0A 00 00 00 00 00 00 00 00 00 00 86
 
 > ⚠️ **THEORY - Multiplexed Data**: These bytes cycle through different patterns during operation. They do NOT appear to be simple status flags.
 
-**Observed Patterns:**
-| b31  | b32  | b33  | Interpretation |
-|------|------|------|----------------|
-| 0x80 | 0x00 | 0x00 | Idle/baseline |
-| 0xC0 | 0xXX | 0xXX | Active operation (values vary) |
+**Observed Patterns (3 distinct slots, cycling every ~15 seconds):**
+| b31  | b32  | b33  | Slot | Notes |
+|------|------|------|------|-------|
+| 0x80 | 0x19 | 0x83 | 1    | Values vary with operation |
+| 0xC0 | 0x00 | 0x00 | 2    | Often zeros |
+| 0xC1 | 0x44 | 0x15 | 3    | Values vary with operation |
+
+**Pattern Analysis:**
+- High nibble of b31 appears to be a **type selector**: 0x8_ vs 0xC_
+- Cycles through all 3 slots every ~15 seconds (3 poll intervals at 5s each)
+- Values in b32/b33 vary during operation - likely telemetry data
 
 **Observations:**
 - Values cycle through patterns even during steady-state operation
 - Pattern suggests time-multiplexed telemetry (different data on each poll)
 - May contain: compressor frequency, fan RPM, refrigerant pressure, or other sensor data
-- Not suitable for status detection (too dynamic)
+- Not suitable for simple status detection (too dynamic)
 
-> ⚠️ **UNCONFIRMED**: The exact meaning of each mux slot is unknown. Further investigation with longer capture periods needed.
+> ⚠️ **UNCONFIRMED**: The exact meaning of each mux slot is unknown. The 0x19 0x83 and 0x44 0x15 patterns could represent compressor Hz, fan RPM, or refrigerant pressure. If defrost status is transmitted via multiplexed data, all three slots need to be checked.
 
 ---
 
@@ -301,43 +308,58 @@ These are multiplexed telemetry, not status flags:
 | Value | Binary      | State                    | Status |
 |-------|-------------|--------------------------|--------|
 | 0x40  | 0100 0000   | Idle/stopped             | ✅ Confirmed |
-| 0x44  | 0100 0100   | Shutdown transition      | ✅ Confirmed (35 occurrences observed) |
-| 0x48  | 0100 1000   | Startup (fan warming)    | ✅ Confirmed |
+| 0x44  | 0100 0100   | Shutdown transition      | ⚠️ Intermittent (see note) |
+| 0x48  | 0100 1000   | Startup (fan pre-heat)   | ✅ Confirmed |
 | 0x4C  | 0100 1100   | Running (full operation) | ✅ Confirmed |
 
 **Bit Layout:**
 ```
 0x4C = 0100 1100 - Running (fan + compressor)
 0x48 = 0100 1000 - Startup (fan only, pre-compressor)
-0x44 = 0100 0100 - Shutdown (compressor off, fan winding down)
+0x44 = 0100 0100 - Shutdown (compressor stopping)
 0x40 = 0100 0000 - Idle (stopped)
        ││││ ││││
        ││││ │└┴┴─ Bits 0-2: (always 0 in observed states)
-       ││││ └──── Bit 3 (0x08): Fan running
-       │││└────── Bit 2 (0x04): System transitioning (startup/shutdown)
+       ││││ └──── Bit 3 (0x08): Fan active
+       │││└────── Bit 2 (0x04): Compressor active
        │└┴─────── Bits 4-6: (always 010 in observed states)
        └───────── Bit 7: (always 0)
 ```
 
+**Bit Interpretation:**
+| State | Bit 3 (Fan) | Bit 2 (Compressor) | Physical Meaning |
+|-------|-------------|--------------------| -----------------|
+| 0x48  | 1           | 0                  | Fan on, compressor off (pre-heat) |
+| 0x4C  | 1           | 1                  | Both on (running) |
+| 0x44  | 0           | 1                  | Compressor stopping, fan already off |
+| 0x40  | 0           | 0                  | Both off (idle) |
+
 **State Transitions Observed:**
-- **Startup**: 0x40 → 0x48 → 0x4C (idle → fan warming → full operation)
-- **Shutdown**: 0x4C → 0x44 → 0x40 (running → fan winding down → idle)
+- **Startup**: 0x40 → 0x48 → 0x4C (idle → fan pre-heat → full operation)
+- **Shutdown**: 0x4C → 0x44 → 0x40 (running → transition → idle)
+- **Direct shutdown**: 0x4C → 0x40 (occurs ~50% of time, see note below)
 
 **Power Correlation:**
 | State | Typical Power | Description |
 |-------|---------------|-------------|
-| 0x40  | ~33W          | Standby/idle |
-| 0x44  | ~33W          | Fan winding down (compressor off) |
+| 0x40  | ~7W (Shelly)  | Standby/idle |
+| 0x44  | ~7W (Shelly)  | Brief transition (~5 sec) |
 | 0x48  | ~92W          | Fan only (pre-compressor) |
 | 0x4C  | ~750W+        | Full operation (varies with load) |
 
 **Startup Sequence Timing (observed):**
 - 0x40 → 0x48: Immediate on mode change
-- 0x48 → 0x4C: ~3 minutes (compressor startup delay)
+- 0x48 → 0x4C: **15-20 seconds** (3-4 poll cycles)
 
-✅ All 4 states confirmed via live testing (2025-12-12/13)
+> ⚠️ **Note**: Original ESPHome documentation stated ~3 minutes for startup. This appears to confuse the compressor protection delay (minimum time between stop/start cycles) with actual startup timing. Live testing shows 15-20 seconds consistently.
 
-> ⚠️ **UNCONFIRMED - Defrost Theory**: Other bit patterns (e.g., 0x50, 0x54) may indicate defrost/deicing mode. Defrost cycles have not been observed yet. This remains speculation pending winter testing with active defrost cycles.
+**0x44 Detection Note:**
+> ⚠️ The 0x44 shutdown state is **intermittent** - only ~50% of shutdown cycles show it. This is because 0x44 is a brief transition state (~5 seconds). With 5-second polling, we only catch it when timing aligns. Code should NOT rely on seeing 0x44 for shutdown detection - instead detect 0x4C → 0x40 transitions.
+
+✅ States 0x40, 0x48, 0x4C confirmed via live testing (2025-12-12/13)
+⚠️ State 0x44 confirmed but intermittently captured due to polling resolution
+
+> ⚠️ **UNCONFIRMED - Defrost Theory**: Other bit patterns (e.g., 0x50, 0x54) may indicate defrost/deicing mode. Prediction: defrost may show 0x44 (compressor on, fan off) or a new value. Defrost cycles have not been observed yet - needs cold weather testing.
 
 ---
 
@@ -358,48 +380,78 @@ These are multiplexed telemetry, not status flags:
 
 ### Thermal Baseline Data (Heating Mode)
 
-> ⚠️ **UNCONFIRMED - Baseline for Defrost Detection**: The following thermal data may help identify defrost cycles when they occur.
+> ⚠️ **Baseline for Defrost Detection**: The following thermal data may help identify defrost cycles when they occur.
 
-**Normal Heating Operation:**
-| Measurement | Value | Source |
-|-------------|-------|--------|
-| Inflow temp (b18) | ~23°C | CN-CNT / Zigbee |
-| Outflow temp | ~30°C | Zigbee sensor |
-| Delta T | ~7°C | Calculated |
-| Inflow humidity | ~30% | Zigbee |
-| Outflow humidity | ~18% | Zigbee |
+**Running vs Stopped Temperatures (via external Zigbee sensors):**
+
+| Condition | Inflow (b18) | Outflow | Delta T | Notes |
+|-----------|--------------|---------|---------|-------|
+| **Running** | ~23°C | **35-37°C** | ~12-14°C | Normal heating operation |
+| **Stopped** | ~23°C | ~30°C | ~7°C | Coil cooling down |
+
+> ⚠️ **Correction**: Previous documentation stated outflow ~30°C during normal operation. This is incorrect - 30°C only occurs when stopped (coil cooling down). Running outflow is 35-37°C.
+
+**Thermal Dynamics (observed):**
+| Transition | Rate | Thermal Lag |
+|------------|------|-------------|
+| Stop → cooldown | ~2°C/min | 45 seconds before temp drops |
+| Start → warmup | ~1.5°C/min | 2 minutes to reach full temp |
+
+**Humidity (via Zigbee sensors):**
+| Location | Running | Notes |
+|----------|---------|-------|
+| Inflow | ~30% | Ambient room humidity |
+| Outflow | ~18% | Heated air, lower relative humidity |
 
 **Theory for Defrost Detection:**
-- During defrost, outdoor unit reverses cycle (cooling coil)
+- During defrost, outdoor unit reverses cycle (becomes cooling coil)
 - Indoor fan typically stops or slows
-- Delta T should drop significantly (outflow ≈ inflow)
-- Byte 12 may show different state (0x50, 0x54?)
+- **Defrost signature**: Outflow dropping below 28°C during heating mode would be anomalous
+- This indicates either: fan stopped, or refrigerant reversed
+- Byte 12 may show different state (0x44 with fan off? or new value 0x50, 0x54?)
 - Monitor for these conditions during winter operation
 
 ## Power Consumption
 
 | Byte | Description      |
 |------|------------------|
-| 28   | Low byte         |
-| 29   | High byte        |
-| 30   | Offset/scaling   |
+| 28   | Raw power value (low byte) |
+| 29   | Raw power value (high byte) |
+| 30   | Scaling factor (correlates with compressor load) |
 
+**Published Formula (from ESPHome):**
 ```cpp
 power_watts = (byte_28 + (byte_29 * 256)) - byte_30;
 ```
 
-> ⚠️ **KNOWN ISSUE - Formula Inaccurate**: The above formula produces values ~100-150W lower than actual measured power (verified via Shelly power meter). The discrepancy exists across all operating states.
+> ⚠️ **FORMULA IS BROKEN** - The published formula does not produce accurate power readings. A complete rework is needed.
 
-**Observed Discrepancy (Shelly meter vs CN-CNT):**
-| CN-CNT Power | Shelly Actual | Difference |
-|--------------|---------------|------------|
-| ~600W        | ~750W         | ~150W      |
-| ~500W        | ~620W         | ~120W      |
-| Idle (~0W)   | ~33W          | ~33W       |
+**Problem Analysis:**
 
-> ⚠️ **THEORY - Byte 30 Correlation**: Byte 30 appears to correlate with compressor frequency/load. When compressor ramps up, b30 increases. The formula may need revision to account for this relationship. More investigation needed.
+| Condition | CN-CNT Raw | CN-CNT Formula | Shelly Actual | Issue |
+|-----------|------------|----------------|---------------|-------|
+| Running   | varies     | ~600W          | ~750W         | 80-150W low |
+| Stopped   | 34         | 34W            | **7W**        | **Backwards!** |
 
-> ⚠️ **UNCONFIRMED**: The baseline floor (~33W standby) is not reflected in CN-CNT readings. This may be intentional (measuring only variable load) or a formula issue.
+The stopped condition is the key insight: CN-CNT reports 34 when actual wall power is only 7W. This means:
+- The value 34 is a **floor/baseline constant**, not actual power
+- CN-CNT cannot report MORE than actual power when stopped
+- The formula doesn't account for this baseline
+
+**Byte 30 Analysis:**
+| b30 Value | Observed Condition | Notes |
+|-----------|-------------------|-------|
+| 0x01      | Idle/low load     | Minimum observed |
+| 0x08-0x10 | Medium load       | |
+| 0x14-0x16+| High load         | Correlates with compressor frequency |
+
+The ratio of raw_power / b30 appears stable (~33-43) across power levels, suggesting b30 tracks compressor frequency or load percentage.
+
+> ⚠️ **THEORY**: CN-CNT may report **outdoor unit power only** (compressor + outdoor fan), not total system power. The ~80-100W difference during operation could be indoor unit (fan, controller, sensors).
+
+> ⚠️ **UNCONFIRMED - Byte 30 meaning**: Likely compressor frequency in some unit. Ranges 0x01-0x16+ observed. Needs more investigation to determine exact relationship.
+
+**Recommendation:** Do not use the published formula for accurate power measurement. Use an external power meter (Shelly, etc.) for reliable readings.
 
 ---
 
@@ -446,14 +498,20 @@ Controller                               AC Unit
 
 ### Defrost/Deicing Status (HIGH PRIORITY)
 - [x] ~~Monitor bytes 31-33 during defrost cycle~~ → Determined to be multiplexed telemetry, not status
-- [ ] Monitor byte 12 during defrost cycle (look for 0x50, 0x54, or other patterns)
-- [ ] Capture thermal data (delta T drop) during defrost
-- [ ] Look for bit-level changes in byte 12
+- [ ] Monitor byte 12 during defrost cycle (look for 0x50, 0x54, or 0x44 patterns)
+- [ ] Capture thermal data (outflow < 28°C anomaly) during defrost
+- [ ] Correlate byte 12 changes with thermal lag patterns
 
-### Power Formula (MEDIUM PRIORITY)
-- [ ] Investigate byte 30 correlation with compressor frequency
-- [ ] Determine if ~100-150W offset is constant or variable
-- [ ] Consider if baseline floor (33W) is intentionally excluded
+### Power Formula (HIGH PRIORITY)
+- [ ] Determine why CN-CNT reports 34 when actual power is 7W (baseline constant?)
+- [ ] Investigate byte 30 as compressor frequency indicator
+- [ ] Develop corrected formula or document that formula is unusable
+- [ ] Determine if CN-CNT measures outdoor unit only
+
+### Multiplexed Telemetry (MEDIUM PRIORITY)
+- [ ] Decode mux slot meanings (0x19 0x83, 0x44 0x15 patterns)
+- [ ] Determine if compressor Hz is in multiplexed data
+- [ ] Check if defrost status appears in any mux slot
 
 ### Unknown Bytes
 - [ ] Byte 8: Always 0x00?
@@ -463,11 +521,21 @@ Controller                               AC Unit
 
 ### Completed Investigations
 - [x] Byte 12 state machine (4 states: 0x40, 0x44, 0x48, 0x4C)
+- [x] Byte 12 bit meanings (bit 3 = fan, bit 2 = compressor)
+- [x] Startup timing corrected (15-20 sec, not 3 min)
+- [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
 - [x] Byte 18 = inlet temperature (confirmed via Zigbee)
 - [x] Byte 20 = humidity (confirmed via Zigbee)
 - [x] Byte 21 = byte 18 + 2°C (calculated display value)
-- [x] Bytes 31-33 = multiplexed telemetry (not simple status)
-- [x] Power formula discrepancy identified (~100-150W low)
+- [x] Bytes 31-33 = multiplexed telemetry with 3 slots, 15s cycle
+- [x] Power formula is broken (reports 34W when actual is 7W)
+- [x] Thermal baselines documented (running: 35-37°C outflow, stopped: ~30°C)
+
+### Open Questions
+1. Why does CN-CNT report 34 when actual power is 7W? Is 34 a "compressor ready" indicator?
+2. What's in the multiplexed bytes? Could be compressor Hz, fan RPM, refrigerant pressure?
+3. Byte 30 exact meaning? Ranges 0x01-0x16+, correlates with load
+4. What byte 12 value during defrost? Prediction: 0x44 (compressor on, fan off) or 0x50/0x54
 
 ---
 
