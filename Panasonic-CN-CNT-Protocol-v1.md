@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.3     | 2025-12-14 | -      | OFF vs IDLE baseline distinction, power formula refinement (×1.10) |
 | 1.2     | 2025-12-14 | -      | **NEW STATE 0x04** (power-down transition), byte 13 behavior when OFF |
 | 1.1     | 2025-12-14 | -      | **Control commands tested**: Bidirectional communication confirmed, set-temp working |
 | 1.0     | 2025-12-13 | -      | **MAJOR**: Discovered byte 12 = 0x00 (OFF state), complete state machine now 5 states |
@@ -360,6 +361,8 @@ These are multiplexed telemetry, not status flags:
 
 > ✅ **NEW DISCOVERY (v1.2)**: State 0x04 is a brief power-down transition when turning OFF from RUN. Sequence: RUN (0x4C) → 0x04 → OFF (0x00). This is distinct from 0x44 (which transitions to IDLE, not OFF).
 
+> ⚠️ **Note (v1.3)**: State 0x04 only appears when an explicit OFF command is sent while running. Normal thermostat modulation (RUN → IDLE) uses 0x44 transition, not 0x04. If the unit goes to IDLE naturally, you won't see 0x04.
+
 **Bit Layout:**
 ```
 0x4C = 0100 1100 - Running (fan + compressor)
@@ -417,7 +420,7 @@ These are multiplexed telemetry, not status flags:
 > ⚠️ **Note**: Original ESPHome documentation stated ~3 minutes for startup. This appears to confuse the compressor protection delay (minimum time between stop/start cycles) with actual startup timing. Live testing shows 15-20 seconds consistently.
 
 **0x44 Detection Note:**
-> ⚠️ The 0x44 shutdown state is **intermittent** - only ~50% of shutdown cycles show it. This is because 0x44 is a brief transition state (~5 seconds). With 5-second polling, we only catch it when timing aligns. Code should NOT rely on seeing 0x44 for shutdown detection - instead detect 0x4C → 0x40 transitions.
+> ✅ **CONFIRMED (v1.3)**: The 0x44 state is real and consistent - captured on multiple shutdown cycles. It's a brief transition (~5 seconds) so may be missed with 5-second polling. Both observed shutdowns showed: 0x4C → 0x44 (~480W) → 0x40 (~27W). Code should still detect 0x4C → 0x40 transitions as backup.
 
 ✅ States 0x00, 0x04, 0x40, 0x44, 0x48, 0x4C confirmed via live testing (2025-12-12/13/14)
 ✅ State 0x00 (OFF) discovered via live testing with mode change (2025-12-13)
@@ -491,11 +494,13 @@ Based on correlation analysis with Shelly power meter (470 running samples):
 **Power Formula:**
 ```
 raw_power = b28 + (b29 × 256)
-total_watts = raw_power × 1.14
+total_watts = raw_power × 1.10
 ```
 - R² = 0.9943 (excellent correlation)
-- CN-CNT measures **~88% of total power** (outdoor unit only)
-- Difference (~12%) is indoor unit overhead (fan, electronics)
+- CN-CNT measures **~91% of total power** (outdoor unit only)
+- Difference (~9%) is indoor unit overhead (fan, electronics)
+
+> ✅ **REFINED (v1.3)**: Original multiplier 1.14 was ~5% high at peak power. Testing shows ×1.10 is more accurate across the range. Error typically <2% at mid-range, ~5% at extremes.
 
 **Current Formula:**
 ```
@@ -506,11 +511,14 @@ amps = b30 / 5.0
 
 ### Stopped State Baseline
 
-| Condition | b28 | b29 | b30 | CN-CNT "Power" | Shelly Actual |
-|-----------|-----|-----|-----|----------------|---------------|
-| Stopped   | 34-35 | 0 | 1 | 34-35 | **11W** |
+> ✅ **UPDATED (v1.3)**: OFF and IDLE have distinct baseline patterns.
 
-> ⚠️ **IMPORTANT**: When stopped (b12=0x40), bytes 28-30 are **baseline constants**, not real measurements. The values 34/0/1 are always present regardless of actual standby power (~10W).
+| State | b12  | b28       | b29  | b30  | Shelly Actual |
+|-------|------|-----------|------|------|---------------|
+| OFF   | 0x00 | 0x0F (15) | 0x00 | 0x00 | **~2-3W**     |
+| IDLE  | 0x40 | 0x22 (34) | 0x00 | 0x01 | **~7-8W**     |
+
+> ⚠️ **IMPORTANT**: When stopped, bytes 28-30 are **baseline constants**, not real measurements. The values differ between OFF and IDLE states, providing a way to distinguish them even without checking byte 12.
 
 ### Running State Validation
 
@@ -524,9 +532,10 @@ amps = b30 / 5.0
 
 | Metric | Formula | R² | Notes |
 |--------|---------|-----|-------|
-| Total Power | `(b28 + b29×256) × 1.14` | 0.9943 | Only valid when running (b12=0x4C) |
+| Total Power | `(b28 + b29×256) × 1.10` | 0.9943 | Only valid when running (b12=0x4C) |
 | Current | `b30 / 5.0` | 0.9948 | Amps, ~0.15A accuracy |
-| Standby | Use fixed 10W | - | CN-CNT values are constants when stopped |
+| OFF baseline | b28=15, b30=0 | - | ~2-3W actual |
+| IDLE baseline | b28=34, b30=1 | - | ~7-8W actual |
 
 ✅ Formulas validated via Shelly power meter correlation (2025-12-13)
 
