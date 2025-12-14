@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.2     | 2025-12-14 | -      | **NEW STATE 0x04** (power-down transition), byte 13 behavior when OFF |
 | 1.1     | 2025-12-14 | -      | **Control commands tested**: Bidirectional communication confirmed, set-temp working |
 | 1.0     | 2025-12-13 | -      | **MAJOR**: Discovered byte 12 = 0x00 (OFF state), complete state machine now 5 states |
 | 0.9     | 2025-12-13 | -      | Analyzed unknown bytes: 10 static, byte 13 variable (temp offset) |
@@ -149,7 +150,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 10   | 0x00    | Eco mode                         | ✅ Known    |
 | 11   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 12   | 0x00-4C | Operational status (state machine)| ✅ Confirmed |
-| 13   | 0x2B/2C | Temp offset? (target+3 or +4)    | ⚠️ Variable |
+| 13   | 0x2B/2C | Temp offset (target+3 when ON, =target when OFF) | ✅ Confirmed |
 | 14   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 15   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 16   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
@@ -351,19 +352,21 @@ These are multiplexed telemetry, not status flags:
 | Value | Binary      | State                    | Status |
 |-------|-------------|--------------------------|--------|
 | 0x00  | 0000 0000   | **OFF** (unit powered off via mode) | ✅ Confirmed |
+| 0x04  | 0000 0100   | **Power-down transition** | ✅ Confirmed (v1.2) |
 | 0x40  | 0100 0000   | Idle (ON but waiting)    | ✅ Confirmed |
 | 0x44  | 0100 0100   | Shutdown transition      | ⚠️ Intermittent (see note) |
 | 0x48  | 0100 1000   | Startup (fan pre-heat)   | ✅ Confirmed |
 | 0x4C  | 0100 1100   | Running (full operation) | ✅ Confirmed |
 
-> ✅ **NEW DISCOVERY (v1.0)**: Byte 12 = 0x00 when unit is completely OFF. This is distinct from 0x40 (idle) - 0x00 means the unit is powered off via mode change, while 0x40 means the unit is ON but not actively heating/cooling.
+> ✅ **NEW DISCOVERY (v1.2)**: State 0x04 is a brief power-down transition when turning OFF from RUN. Sequence: RUN (0x4C) → 0x04 → OFF (0x00). This is distinct from 0x44 (which transitions to IDLE, not OFF).
 
 **Bit Layout:**
 ```
 0x4C = 0100 1100 - Running (fan + compressor)
 0x48 = 0100 1000 - Startup (fan only, pre-compressor)
-0x44 = 0100 0100 - Shutdown (compressor stopping)
+0x44 = 0100 0100 - Shutdown transition (to IDLE)
 0x40 = 0100 0000 - Idle (ON but waiting)
+0x04 = 0000 0100 - Power-down transition (to OFF)
 0x00 = 0000 0000 - OFF (unit disabled via mode)
        ││││ ││││
        ││││ │└┴┴─ Bits 0-2: (always 0 in observed states)
@@ -392,16 +395,18 @@ These are multiplexed telemetry, not status flags:
 **State Transitions Observed:**
 - **Power ON**: 0x00 → 0x40 (OFF → idle, ~30 seconds delay)
 - **Startup**: 0x40 → 0x48 → 0x4C (idle → fan pre-heat → full operation)
-- **Shutdown**: 0x4C → 0x44 → 0x40 (running → transition → idle)
+- **Shutdown to idle**: 0x4C → 0x44 → 0x40 (running → transition → idle)
 - **Direct shutdown**: 0x4C → 0x40 (occurs ~50% of time, see note below)
-- **Power OFF**: 0x4C → 0x00 (running → OFF, immediate on mode change)
+- **Power OFF from RUN**: 0x4C → 0x04 → 0x00 (running → power-down → OFF)
+- **Power OFF from IDLE**: 0x40 → 0x00 (idle → OFF, immediate)
 
 **Power Correlation:**
 | State | Typical Power | Description |
 |-------|---------------|-------------|
 | 0x00  | ~7W (Shelly)  | Unit OFF (same standby as idle) |
+| 0x04  | ~7W (Shelly)  | Power-down transition (~5 sec) |
 | 0x40  | ~7W (Shelly)  | Standby/idle |
-| 0x44  | ~7W (Shelly)  | Brief transition (~5 sec) |
+| 0x44  | ~7W (Shelly)  | Shutdown transition (~5 sec) |
 | 0x48  | ~92W          | Fan only (pre-compressor) |
 | 0x4C  | ~750W+        | Full operation (varies with load) |
 
@@ -414,9 +419,10 @@ These are multiplexed telemetry, not status flags:
 **0x44 Detection Note:**
 > ⚠️ The 0x44 shutdown state is **intermittent** - only ~50% of shutdown cycles show it. This is because 0x44 is a brief transition state (~5 seconds). With 5-second polling, we only catch it when timing aligns. Code should NOT rely on seeing 0x44 for shutdown detection - instead detect 0x4C → 0x40 transitions.
 
-✅ States 0x00, 0x40, 0x48, 0x4C confirmed via live testing (2025-12-12/13)
+✅ States 0x00, 0x04, 0x40, 0x44, 0x48, 0x4C confirmed via live testing (2025-12-12/13/14)
 ✅ State 0x00 (OFF) discovered via live testing with mode change (2025-12-13)
-⚠️ State 0x44 confirmed but intermittently captured due to polling resolution
+✅ State 0x04 (power-down) discovered via anomaly watchdog (2025-12-14)
+⚠️ States 0x04 and 0x44 are brief transitions - may be missed at 5s polling
 
 > ⚠️ **UNCONFIRMED - Defrost Theory**: Other bit patterns (e.g., 0x50, 0x54) may indicate defrost/deicing mode. Prediction: defrost may show 0x44 (compressor on, fan off) or a new value. Defrost cycles have not been observed yet - needs cold weather testing.
 
@@ -601,8 +607,10 @@ Controller                               AC Unit
 - [ ] Swing command - untested
 
 ### Completed Investigations
-- [x] Byte 12 state machine (**5 states**: 0x00, 0x40, 0x44, 0x48, 0x4C)
-- [x] **NEW: 0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
+- [x] Byte 12 state machine (**6 states**: 0x00, 0x04, 0x40, 0x44, 0x48, 0x4C)
+- [x] **0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
+- [x] **0x04 = Power-down transition** (RUN → 0x04 → OFF) - discovered via anomaly watchdog
+- [x] **Byte 13 behavior**: target+3 when ON, equals target when OFF
 - [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor) - needs defrost verification
 - [x] Startup timing corrected (15-20 sec, not 3 min)
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
