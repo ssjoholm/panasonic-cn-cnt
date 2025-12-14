@@ -628,10 +628,10 @@ Controller                               AC Unit
 - [x] Byte 21 = byte 18 + 2°C (calculated display value)
 - [x] **Bytes 31-33 = static identifiers** (NOT telemetry - same values in all states)
 - [x] Thermal baselines documented (running: 35-37°C outflow, stopped: ~30°C)
-- [x] **Power formula validated** (R²=0.9943): `total_watts = (b28 + b29×256) × 1.14`
+- [x] **Power formula validated** (R²=0.9943): `total_watts = (b28 + b29×256) × 1.10`
 - [x] **Current formula validated** (R²=0.9948): `amps = b30 / 5.0`
-- [x] **CN-CNT measures outdoor unit only** (~88% of total power)
-- [x] **Stopped state baseline confirmed**: b28=34, b29=0, b30=1 are constants
+- [x] **CN-CNT measures outdoor unit only** (~91% of total power)
+- [x] **Stopped state baselines**: OFF (b28=15, b30=0, ~2W) vs IDLE (b28=34, b30=1, ~8W)
 
 ### Open Questions
 1. ~~Why does CN-CNT report 34 when actual power is 7W?~~ → **ANSWERED**: Baseline constant, not real measurement
