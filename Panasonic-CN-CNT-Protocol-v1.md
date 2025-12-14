@@ -159,7 +159,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 18   | 0x17    | Current/room temperature         | ✅ Confirmed (via Zigbee sensor at inlet) |
 | 19   | 0x03    | Outside temperature              | ✅ Confirmed (via Panasonic app) |
 | 20   | 0x1F    | Humidity %                       | ✅ Confirmed (via Zigbee sensor) |
-| 21   | 0x16    | Room/inlet temperature           | ✅ Confirmed (via Panasonic app) |
+| 21   | 0x16    | Room temp display (≈ b18, ±1°C)  | ✅ Confirmed |
 | 22   | 0x03    | Outside temperature (alt)        | ✅ Confirmed |
 | 23   | 0xFF    | Marker                           | ✅ Known    |
 | 24   | 0x80    | Reserved/unsupported (always 0x80)| ✅ Static   |
@@ -438,13 +438,13 @@ These are multiplexed telemetry, not status flags:
 | 18   | Current/room temperature   | Sensor at AC air intake   | ✅ Confirmed (via Zigbee sensor) |
 | 19   | Outside temperature        | Signed int8, °C           | ✅ Confirmed (via Panasonic app) |
 | 20   | Humidity %                 | Sensor at AC air intake   | ✅ Confirmed (via Zigbee sensor) |
-| 21   | Room temperature (display) | Byte 18 + 2°C (calculated)| ✅ Confirmed |
+| 21   | Room temperature (display) | ≈ Byte 18 (same sensor, ±1°C variance) | ✅ Confirmed |
 | 22   | Outside temp (alternate)   | Same as byte 19           | ✅ Confirmed |
 
 - Value `0x80` = Unsupported/unavailable
 - Values > 100 considered out of range
 
-**Note**: Byte 18 confirmed via external Zigbee sensor at AC intake - values match within 0.5°C. Panasonic calls this "room temperature" as it's the only internal air sensor. Byte 20 (humidity) also confirmed via Zigbee sensor - matches within 0.5%. Byte 21 is always byte 18 + 2°C (calculated, not a separate sensor).
+**Note**: Byte 18 confirmed via external Zigbee sensor at AC intake - values match within 0.5°C. Panasonic calls this "room temperature" as it's the only internal air sensor. Byte 20 (humidity) also confirmed via Zigbee sensor - matches within 0.5%. Byte 21 appears to be the same sensor as byte 18 with minor variance (±1°C) - likely due to timing or rounding differences, not a fixed offset.
 
 ### Thermal Baseline Data (Heating Mode)
 
@@ -625,7 +625,7 @@ Controller                               AC Unit
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
 - [x] Byte 18 = inlet temperature (confirmed via Zigbee)
 - [x] Byte 20 = humidity (confirmed via Zigbee)
-- [x] Byte 21 = byte 18 + 2°C (calculated display value)
+- [x] Byte 21 ≈ byte 18 (same sensor, ±1°C variance)
 - [x] **Bytes 31-33 = static identifiers** (NOT telemetry - same values in all states)
 - [x] Thermal baselines documented (running: 35-37°C outflow, stopped: ~30°C)
 - [x] **Power formula validated** (R²=0.9943): `total_watts = (b28 + b29×256) × 1.10`
