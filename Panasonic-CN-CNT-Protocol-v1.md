@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.1     | 2025-12-14 | -      | **Control commands tested**: Bidirectional communication confirmed, set-temp working |
 | 1.0     | 2025-12-13 | -      | **MAJOR**: Discovered byte 12 = 0x00 (OFF state), complete state machine now 5 states |
 | 0.9     | 2025-12-13 | -      | Analyzed unknown bytes: 10 static, byte 13 variable (temp offset) |
 | 0.8     | 2025-12-13 | -      | Bytes 31-33 are static identifiers (not telemetry), same values in all states |
@@ -98,7 +99,36 @@ TX: 70 0A 00 00 00 00 00 00 00 00 00 00 86
 
 - **Header**: `0xF0`
 - **Payload Length**: 10 bytes (0x0A)
+- **Total Packet Size**: 13 bytes (header + length + 10 payload + checksum)
 - **Interval**: Commands sent with 250ms minimum spacing
+
+> ✅ **CONFIRMED (v1.1)**: Bidirectional control tested and working via Raspberry Pi on 2025-12-14.
+
+**Example - Set Temperature to 20.5°C:**
+```
+TX: F0 0A 44 29 80 30 5C 00 00 00 00 00 8D
+    │  │  │  │  │  │  │              │
+    │  │  │  │  │  │  │              └─ Checksum
+    │  │  │  │  │  │  └─ Swing (V+H)
+    │  │  │  │  │  └─ Fan speed (0x30 = level 1)
+    │  │  │  │  └─ Mild dry
+    │  │  │  └─ Target temp (0x29 = 41 → 20.5°C)
+    │  │  └─ Mode + Power (0x44 = Heat + ON)
+    │  └─ Length (10)
+    └─ Header (Control)
+
+RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
+    │     │  │                       │  │
+    │     │  └─ Target confirmed     │  └─ Byte 13 = target + 3
+    │     └─ Mode confirmed          └─ State (Running)
+    └─ Poll response header
+```
+
+**Tested Commands (2025-12-14):**
+| Command | Hex Sent | Result |
+|---------|----------|--------|
+| Set temp 20.5°C | `F00A442980305C00000000008D` | ✅ Verified |
+| Set temp 20.0°C | `F00A442880305C00000000008E` | ✅ Verified |
 
 ---
 
@@ -190,18 +220,26 @@ These are multiplexed telemetry, not status flags:
 
 ## Control Command - Byte Map (10 bytes payload)
 
-| Byte | Purpose                          |
-|------|----------------------------------|
-| 0    | Mode + Power                     |
-| 1    | Target temperature × 2           |
-| 2    | Mild dry                         |
-| 3    | Fan speed                        |
-| 4    | Swing (V + H)                    |
-| 5    | Preset / NanoE-X / EcoNavi       |
-| 6    | (unused in control)              |
-| 7    | (unused in control)              |
-| 8    | Eco mode                         |
-| 9    | (unused in control)              |
+| Byte | Purpose                          | Status |
+|------|----------------------------------|--------|
+| 0    | Mode + Power                     | ✅ Tested |
+| 1    | Target temperature × 2           | ✅ Tested |
+| 2    | Mild dry                         | ⚠️ Untested |
+| 3    | Fan speed                        | ⚠️ Untested |
+| 4    | Swing (V + H)                    | ⚠️ Untested |
+| 5    | Preset / NanoE-X / EcoNavi       | ⚠️ Untested |
+| 6    | (unused - send 0x00)             | ✅ Confirmed |
+| 7    | (unused - send 0x00)             | ✅ Confirmed |
+| 8    | Eco mode                         | ⚠️ Untested |
+| 9    | (unused - send 0x00)             | ✅ Confirmed |
+
+**Building a Control Command:**
+1. Read current state via poll command (0x70)
+2. Copy bytes 2-7 and 10 from response to payload bytes 0-5 and 8
+3. Modify desired values
+4. Set unused bytes (6, 7, 9) to 0x00
+5. Calculate checksum: `(256 - sum(all_bytes)) % 256`
+6. Send: `[0xF0, 0x0A, payload[0-9], checksum]`
 
 ---
 
@@ -552,6 +590,15 @@ Controller                               AC Unit
 - [x] Bytes 11, 14-17: Always 0x00 (reserved)
 - [x] Byte 13: Variable 0x2B/0x2C - related to target temp (target+3 or +4)
 - [x] Bytes 24, 25, 27: Always 0x80 (reserved/unsupported marker)
+
+### Control Commands (TESTED 2025-12-14)
+- [x] **Bidirectional communication confirmed** - commands sent and acknowledged
+- [x] **Set temperature working** - 20.0°C ↔ 20.5°C tested successfully
+- [x] **Byte 13 confirmed**: Changes to target + 3 (raw units) after command
+- [ ] Fan speed command - untested
+- [ ] Mode change command - untested
+- [ ] Power on/off command - untested
+- [ ] Swing command - untested
 
 ### Completed Investigations
 - [x] Byte 12 state machine (**5 states**: 0x00, 0x40, 0x44, 0x48, 0x4C)
