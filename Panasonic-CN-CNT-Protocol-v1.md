@@ -151,7 +151,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 10   | 0x00    | Eco mode                         | ✅ Known    |
 | 11   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 12   | 0x00-4C | Operational status (state machine)| ✅ Confirmed |
-| 13   | 0x2B/2C | Temp offset (target+3 when ON, =target when OFF) | ✅ Confirmed |
+| 13   | 0x2A-2C | Temp offset (target +2 to +4 when ON, =target when OFF) | ✅ Confirmed |
 | 14   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 15   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 16   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
@@ -619,7 +619,7 @@ Controller                               AC Unit
 - [x] Byte 12 state machine (**6 states**: 0x00, 0x04, 0x40, 0x44, 0x48, 0x4C)
 - [x] **0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
 - [x] **0x04 = Power-down transition** (RUN → 0x04 → OFF) - discovered via anomaly watchdog
-- [x] **Byte 13 behavior**: target+3 when ON, equals target when OFF
+- [x] **Byte 13 behavior**: target +2 to +4 when ON (varies), equals target when OFF
 - [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor) - needs defrost verification
 - [x] Startup timing corrected (15-20 sec, not 3 min)
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
