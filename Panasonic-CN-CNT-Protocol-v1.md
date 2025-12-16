@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.4     | 2025-12-16 | -      | **MUX Slot 2 discovery**: NanoE-X status in bytes 31-33, not static |
 | 1.3     | 2025-12-14 | -      | OFF vs IDLE baseline distinction, power formula refinement (×1.10) |
 | 1.2     | 2025-12-14 | -      | **NEW STATE 0x04** (power-down transition), byte 13 behavior when OFF |
 | 1.1     | 2025-12-14 | -      | **Control commands tested**: Bidirectional communication confirmed, set-temp working |
@@ -174,27 +175,28 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 33   | 0x83/00/15 | Static identifier data          | ✅ See below |
 | 34   | 0x??    | Checksum                         | ✅ Confirmed |
 
-### Bytes 31-33: Static Identifiers (Not Telemetry)
+### Bytes 31-33: Multiplexed Status/Identifiers
 
-> ✅ **CONFIRMED - Static Data**: These bytes appear to cycle but values are **constant** across all operational states. They are NOT dynamic telemetry.
+> ✅ **UPDATED (v1.4)**: Slot 2 is NOT static - it reflects NanoE-X status!
 
-**Observed Patterns (static, cycling display only):**
+**Observed Patterns:**
 | b31  | b32  | b33  | Slot | Interpretation |
 |------|------|------|------|----------------|
-| 0x80 | 0x19 | 0x83 | 1    | Model/unit identifier (6531 or 33561) |
-| 0xC0 | 0x00 | 0x00 | 2    | Empty/reserved |
-| 0xC1 | 0x44 | 0x15 | 3    | Version/config identifier (17429 or 5444) |
+| 0x80 | 0x19 | 0x83 | 1    | Model/unit identifier (static) |
+| 0xC0 | 0x00 | 0x00 | 2    | Status: NanoE-X **OFF** |
+| 0xC0 | 0x04 | 0x00 | 2    | Status: NanoE-X **ON** |
+| 0xC1 | 0x44 | 0x15 | 3    | Version/config identifier (static) |
 
-**Analysis (24h data, all states):**
-- Values are **identical** in IDLE, START, RUN, and SHUTDOWN states
-- No correlation with power, current, or any operational metric (R²=0)
-- The "cycling" is just polling sampling different slots, not values changing
-- Slot 2 is always zeros - likely unused/reserved
+**Slot 2 Discovery (2025-12-16):**
+- Middle byte (b32) changes based on NanoE-X setting
+- 0x00 = NanoE-X disabled
+- 0x04 = NanoE-X enabled
+- Other feature bits may also appear here (EcoNavi, Powerful, Quiet?)
 
-**Likely Purpose:**
-- Unit identification or serial number fragments
-- Firmware/hardware version information
-- Model capability flags
+**Slot Purpose:**
+- Slot 1 (0x80): Unit identification (static)
+- Slot 2 (0xC0): Feature status (dynamic)
+- Slot 3 (0xC1): Version/config (static)
 - NOT: compressor Hz, fan RPM, or any dynamic sensor data
 
 ✅ Confirmed static via 24h analysis across all operational states (2025-12-13)
