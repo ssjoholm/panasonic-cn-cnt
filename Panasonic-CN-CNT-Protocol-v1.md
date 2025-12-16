@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.5     | 2025-12-16 | -      | Feature testing: Powerful/Quiet NOT in Slot 2, B13 offset +5 in Powerful mode |
 | 1.4     | 2025-12-16 | -      | **MUX Slot 2 discovery**: NanoE-X status in bytes 31-33, not static |
 | 1.3     | 2025-12-14 | -      | OFF vs IDLE baseline distinction, power formula refinement (×1.10) |
 | 1.2     | 2025-12-14 | -      | **NEW STATE 0x04** (power-down transition), byte 13 behavior when OFF |
@@ -191,7 +192,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 - Middle byte (b32) changes based on NanoE-X setting
 - 0x00 = NanoE-X disabled
 - 0x04 = NanoE-X enabled
-- Other feature bits may also appear here (EcoNavi, Powerful, Quiet?)
+- ✅ **Tested:** Powerful and Quiet modes do NOT appear in Slot 2 (only in byte 7)
 
 **Slot Purpose:**
 - Slot 1 (0x80): Unit identification (static)
@@ -621,7 +622,7 @@ Controller                               AC Unit
 - [x] Byte 12 state machine (**6 states**: 0x00, 0x04, 0x40, 0x44, 0x48, 0x4C)
 - [x] **0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
 - [x] **0x04 = Power-down transition** (RUN → 0x04 → OFF) - discovered via anomaly watchdog
-- [x] **Byte 13 behavior**: target +2 to +4 when ON (varies), equals target when OFF
+- [x] **Byte 13 behavior**: target +2 to +4 when ON (Normal/Quiet), +5 in Powerful mode, equals target when OFF
 - [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor) - needs defrost verification
 - [x] Startup timing corrected (15-20 sec, not 3 min)
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
