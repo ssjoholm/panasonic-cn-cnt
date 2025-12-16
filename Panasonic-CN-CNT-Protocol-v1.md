@@ -31,6 +31,8 @@
 
 The CN-CNT port is a serial UART interface found on Panasonic air conditioners, typically used by the CZ-TACG1 WiFi adapter module. This document describes the protocol reverse-engineered from the ESPHome component and official protocol documentation.
 
+**Tested Unit:** CS-HZ35XKE (3.5kW heat pump, NanoE-X, no EcoNavi)
+
 ## Physical Layer
 
 - **Interface**: UART Serial
@@ -183,7 +185,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 **Observed Patterns:**
 | b31  | b32  | b33  | Slot | Interpretation |
 |------|------|------|------|----------------|
-| 0x80 | 0x19 | 0x83 | 1    | Model/unit identifier (static) |
+| 0x80 | 0x19 | 0x83 | 1    | Model/unit identifier (static) - CS-HZ35XKE |
 | 0xC0 | 0x00 | 0x00 | 2    | Status: NanoE-X **OFF** |
 | 0xC0 | 0x04 | 0x00 | 2    | Status: NanoE-X **ON** |
 | 0xC1 | 0x44 | 0x15 | 3    | Version/config identifier (static) |
