@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.6     | 2025-12-16 | -      | **Power OFF command verified**, protocol probing (only 0x70/0xF0 respond) |
 | 1.5     | 2025-12-16 | -      | Feature testing: Powerful/Quiet NOT in Slot 2, B13 offset +5 in Powerful mode |
 | 1.4     | 2025-12-16 | -      | **MUX Slot 2 discovery**: NanoE-X status in bytes 31-33, not static |
 | 1.3     | 2025-12-14 | -      | OFF vs IDLE baseline distinction, power formula refinement (×1.10) |
@@ -130,11 +131,14 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
     └─ Poll response header
 ```
 
-**Tested Commands (2025-12-14):**
+**Tested Commands (2025-12-14/16):**
 | Command | Hex Sent | Result |
 |---------|----------|--------|
 | Set temp 20.5°C | `F00A442980305C00000000008D` | ✅ Verified |
 | Set temp 20.0°C | `F00A442880305C00000000008E` | ✅ Verified |
+| Power OFF | `F00A0000000000000000000006` | ✅ Verified (2025-12-16) |
+
+> **Note**: Power OFF command sends all zeros in payload. Mode+Power byte = 0x00 triggers shutdown.
 
 ---
 
@@ -617,7 +621,7 @@ Controller                               AC Unit
 - [x] **Byte 13 confirmed**: Changes to target + 3 (raw units) after command
 - [ ] Fan speed command - untested
 - [ ] Mode change command - untested
-- [ ] Power on/off command - untested
+- [x] **Power OFF command tested** - payload all zeros triggers shutdown (2025-12-16)
 - [ ] Swing command - untested
 
 ### Completed Investigations
