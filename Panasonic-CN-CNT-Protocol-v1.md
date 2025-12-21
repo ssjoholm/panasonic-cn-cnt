@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.7     | 2025-12-21 | -      | B13 offset varies by state: +6 right after RUN→IDLE, settles to +4 |
 | 1.6     | 2025-12-16 | -      | **Power OFF command verified**, protocol probing (only 0x70/0xF0 respond) |
 | 1.5     | 2025-12-16 | -      | Feature testing: Powerful/Quiet NOT in Slot 2, B13 offset +5 in Powerful mode |
 | 1.4     | 2025-12-16 | -      | **MUX Slot 2 discovery**: NanoE-X status in bytes 31-33, not static |
@@ -628,7 +629,11 @@ Controller                               AC Unit
 - [x] Byte 12 state machine (**6 states**: 0x00, 0x04, 0x40, 0x44, 0x48, 0x4C)
 - [x] **0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
 - [x] **0x04 = Power-down transition** (RUN → 0x04 → OFF) - discovered via anomaly watchdog
-- [x] **Byte 13 behavior**: target +2 to +4 when ON (Normal/Quiet), +5 in Powerful mode, equals target when OFF
+- [x] **Byte 13 behavior**: varies by mode and state:
+  - OFF: equals target (b13 = b3)
+  - RUN (Normal/Quiet): +2 to +4
+  - IDLE (Normal/Quiet): +2 to +6 (elevated after RUN, settles in ~1 min)
+  - Powerful: +4 to +8
 - [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor) - needs defrost verification
 - [x] Startup timing corrected (15-20 sec, not 3 min)
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
