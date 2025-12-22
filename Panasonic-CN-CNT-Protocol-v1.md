@@ -2,6 +2,8 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 2.0     | 2025-12-22 | -      | **MAJOR**: Remote testing - Fan modes confirmed (Auto/Quiet/Powerful use b5=0xA0 + b7 flags), B13 offset correlates with outside temp (r=-0.71), Sleep timer not visible |
+| 1.9     | 2025-12-22 | -      | B13 offset for RUN expanded to +2 to +6 (same as IDLE), Auto fan = 0xA0 confirmed |
 | 1.8     | 2025-12-22 | -      | **DEFROST DETECTED**: Byte 14 = 0x02 during defrost, RUN→START transition |
 | 1.7     | 2025-12-21 | -      | B13 offset varies by state: +6 right after RUN→IDLE, settles to +4 |
 | 1.6     | 2025-12-16 | -      | **Power OFF command verified**, protocol probing (only 0x70/0xF0 respond) |
@@ -235,14 +237,60 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 03:40:45  b12=0x4C (RUN), b14=0x00 (normal operation resumes)
 ```
 
-**LOWER PRIORITY - Bytes 31-33**
-These are multiplexed telemetry, not status flags:
-- Cycle through patterns during operation
-- May contain useful data but not for simple status detection
+---
 
-**MEDIUM PRIORITY - Other unknown bytes**
-- Bytes 8, 9, 11-17: Unknown static values
-- Bytes 24, 25, 27: Show 0x80 (could be status or "unsupported")
+### ✅ Byte 13 Offset Analysis (CONFIRMED 2025-12-22)
+
+**Discovery**: Byte 13 offset strongly correlates with outside temperature (r = **-0.71**)
+
+Byte 13 = Byte 3 (target) + offset. The offset represents an internal "heating effort level" that compensates for heat loss in cold weather.
+
+**Correlation Analysis (104k samples over 10 days):**
+
+| Outside Temp | Avg Offset | Internal Boost | Interpretation |
+|--------------|------------|----------------|----------------|
+| -4°C to -2°C | +4.0 to +4.2 | +2.0°C | Cold - max effort |
+| 0°C to 2°C | +3.6 to +3.9 | +1.8°C | Cold - high effort |
+| 4°C to 6°C | +3.0 to +3.5 | +1.5°C | Mild - normal |
+| 8°C to 10°C | +2.0 to +2.7 | +1.0°C | Warm - low effort |
+
+> **Note**: Offset is in raw units (same as byte 3). Divide by 2 for °C boost.
+
+**Practical Meaning**:
+- If setpoint is 20°C and offset is +4 (cold day), internal target = 22°C
+- The AC overshoots slightly to ensure room reaches setpoint despite heat loss
+- This is automatic - no need to manually raise setpoint in cold weather
+
+**Control Strategy Implication**:
+- Adjusting setpoint compounds with offset (25°C setpoint + 2°C offset = 27°C internal target)
+- Fan level control is more efficient for modulating output without changing thermal target
+
+**Service Manual Confirmation**:
+> "When the powerful mode is selected, the internal setting temperature will shift higher up to 1°C (for Heating) than remote control setting temperature to achieve the setting temperature quickly."
+
+This confirms byte 13 is the "internal setting temperature" used by the control system. Powerful mode adds +1°C (+2 raw units) to the base offset.
+
+### Control Loop (from Service Manual)
+
+> "The compressor at outdoor unit is operating following the frequency instructed by the microcomputer at indoor unit that judging the condition according to internal setting temperature and intake air temperature."
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Indoor Unit MCU                       │
+│                                                         │
+│   Internal Setting Temp (b13) ──┐                       │
+│                                 ├──► Calculate gap      │
+│   Intake Air Temp (b18) ────────┘         │             │
+│                                           ▼             │
+│                                   Compressor frequency  │
+│                                   command to outdoor    │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **b13** = Internal target (user setpoint + weather-based offset + mode boost)
+- **b18** = Actual intake air temperature
+- **Gap (b13 - b18)** = Determines compressor effort
+- Compressor Hz is NOT reported in CN-CNT status (it's a command to outdoor unit)
 
 ---
 
@@ -309,14 +357,27 @@ These are multiplexed telemetry, not status flags:
 
 ### Byte 5: Fan Speed
 
-| Value | Speed      |
-|-------|------------|
-| 0xA0  | Automatic  |
-| 0x30  | Level 1    |
-| 0x40  | Level 2    |
-| 0x50  | Level 3    |
-| 0x60  | Level 4    |
-| 0x70  | Level 5    |
+| Value | Speed      | Status |
+|-------|------------|--------|
+| 0x30  | Level 1 (Low) | ✅ Confirmed (remote 2025-12-22) |
+| 0x40  | Level 2    | ✅ Confirmed (remote 2025-12-22) |
+| 0x50  | Level 3 (Medium) | ✅ Confirmed (remote 2025-12-22) |
+| 0x60  | Level 4    | ✅ Confirmed (remote 2025-12-22) |
+| 0x70  | Level 5 (High) | ✅ Confirmed (remote 2025-12-22) |
+| 0xA0  | Auto/Quiet/Powerful | ✅ Confirmed (remote 2025-12-22) |
+
+> ✅ **IMPORTANT (v2.0)**: Auto, Quiet, and Powerful modes all set b5=0xA0. They are differentiated by byte 7:
+
+| b5 | b7 | Mode | Notes |
+|----|-----|------|-------|
+| 0x30-0x70 | 0x00 | Fixed L1-L5 | Byte 5 stays locked to set level |
+| 0xA0 | 0x00 | **Auto** | AC modulates fan internally |
+| 0xA0 | 0x02 | **Powerful** | Max effort heating/cooling |
+| 0xA0 | 0x04 | **Quiet** | Low noise, AC modulates fan |
+
+> **Note**: Sensibo/IR cannot send Quiet mode - only the physical remote can. When fixed levels (L1-L5) are set, byte 5 shows that exact value. When Auto/Quiet/Powerful are set, byte 5 shows 0xA0.
+
+> **Sleep Timer**: Not visible in CN-CNT status. The sleep button on remote cycles through 0.5h-9h shutdown timers but no byte changes in the poll response.
 
 ### Byte 6: Swing Position (Combined)
 
@@ -648,9 +709,10 @@ Controller                               AC Unit
 - [x] **0x04 = Power-down transition** (RUN → 0x04 → OFF) - discovered via anomaly watchdog
 - [x] **Byte 13 behavior**: varies by mode and state:
   - OFF: equals target (b13 = b3)
-  - RUN (Normal/Quiet): +2 to +4
+  - RUN (Normal/Quiet): +2 to +6 (can be elevated, settles to +4)
   - IDLE (Normal/Quiet): +2 to +6 (elevated after RUN, settles in ~1 min)
   - Powerful: +4 to +8
+- [x] **Byte 13 offset correlates with outside temp** (r=-0.71) - colder = higher offset (confirmed 2025-12-22)
 - [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor)
 - [x] **Byte 14 = DEFROST flag** (0x00=normal, 0x02=defrost) - confirmed 2025-12-22
 - [x] Startup timing corrected (15-20 sec, not 3 min)
@@ -664,6 +726,14 @@ Controller                               AC Unit
 - [x] **Current formula validated** (R²=0.9948): `amps = b30 / 5.0`
 - [x] **CN-CNT measures outdoor unit only** (~91% of total power)
 - [x] **Stopped state baselines**: OFF (b28=15, b30=0, ~2W) vs IDLE (b28=34, b30=1, ~8W)
+
+### Fan Mode Testing (COMPLETED 2025-12-22 via physical remote)
+- [x] **L1-L5 (0x30-0x70)**: Fixed fan levels, byte 5 shows exact value
+- [x] **Auto (b5=0xA0, b7=0x00)**: AC modulates fan internally
+- [x] **Powerful (b5=0xA0, b7=0x02)**: Max effort mode
+- [x] **Quiet (b5=0xA0, b7=0x04)**: Low noise mode (Sensibo cannot send this!)
+- [x] **Sleep timer**: NOT visible in CN-CNT status (internal timer only)
+- [x] **+8/15C preset**: Just sets target=13°C + fan=L5, no special mode byte
 
 ### Open Questions
 1. ~~Why does CN-CNT report 34 when actual power is 7W?~~ → **ANSWERED**: Baseline constant, not real measurement
@@ -713,4 +783,6 @@ The following services collect data for protocol analysis:
 
 - Original ESPHome implementation by [@DomiStyle](https://github.com/DomiStyle/esphome-panasonic-ac)
 - CZ-TACG1 WiFi Adapter Module (Panasonic's official WiFi adapter for CN-CNT)
-- Live testing: Raspberry Pi connected to CN-CNT port (2025-12-12 to 2025-12-16)
+- **Panasonic Service Manual** - CS-HZ35XKE (confirms internal temp shift, control loop)
+- Live testing: Raspberry Pi connected to CN-CNT port (2025-12-12 to 2025-12-22)
+- Physical remote testing: Fan modes, presets, sleep timer (2025-12-22)
