@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 1.8     | 2025-12-22 | -      | **DEFROST DETECTED**: Byte 14 = 0x02 during defrost, RUN→START transition |
 | 1.7     | 2025-12-21 | -      | B13 offset varies by state: +6 right after RUN→IDLE, settles to +4 |
 | 1.6     | 2025-12-16 | -      | **Power OFF command verified**, protocol probing (only 0x70/0xF0 respond) |
 | 1.5     | 2025-12-16 | -      | Feature testing: Powerful/Quiet NOT in Slot 2, B13 offset +5 in Powerful mode |
@@ -161,7 +162,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 11   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 12   | 0x00-4C | Operational status (state machine)| ✅ Confirmed |
 | 13   | 0x2A-2C | Temp offset (target +2 to +4 when ON, =target when OFF) | ✅ Confirmed |
-| 14   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
+| 14   | 0x00/02 | **Defrost flag** (0x00=normal, 0x02=defrost) | ✅ Confirmed |
 | 15   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 16   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
 | 17   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
@@ -211,13 +212,28 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 
 ---
 
-### 🎯 Investigation Priority for Defrost Status
+### ✅ Defrost Detection (CONFIRMED 2025-12-22)
 
-**UPDATED PRIORITY - Focus on Byte 12**
-Byte 12 state machine is the most promising for defrost detection:
-- Observed states: 0x40, 0x44, 0x48, 0x4C
-- Other bit patterns (0x50, 0x54, etc.) may indicate defrost
-- Need to capture data during active defrost cycle
+**Byte 14 = Defrost Flag:**
+| Value | Meaning |
+|-------|---------|
+| 0x00  | Normal operation |
+| 0x02  | **Defrost cycle active** |
+
+**Defrost Behavior Observed:**
+- Byte 14 changes from 0x00 → 0x02 when defrost starts
+- Byte 12 shows unusual **RUN → START** transition (normally goes through IDLE)
+- Defrost duration: ~7-10 minutes per cycle
+- Cycle frequency: ~1 hour at -2°C outside temperature
+- At end of defrost: b14 returns to 0x00, then b12 transitions START → RUN
+
+**Example Timeline (2025-12-22 03:36-03:41):**
+```
+03:36:00  b12=0x4C (RUN), b14=0x02 (DEFROST) - defrosting while "running"
+03:39:05  b12=0x48 (START), b14=0x02 (DEFROST) - transition phase
+03:40:35  b14=0x00 (defrost ends)
+03:40:45  b12=0x4C (RUN), b14=0x00 (normal operation resumes)
+```
 
 **LOWER PRIORITY - Bytes 31-33**
 These are multiplexed telemetry, not status flags:
@@ -592,11 +608,12 @@ Controller                               AC Unit
 
 ## TODO - Investigation Needed
 
-### Defrost/Deicing Status (HIGH PRIORITY)
+### Defrost/Deicing Status (COMPLETED 2025-12-22)
 - [x] ~~Monitor bytes 31-33 during defrost cycle~~ → Determined to be multiplexed telemetry, not status
-- [ ] Monitor byte 12 during defrost cycle (look for 0x50, 0x54, or 0x44 patterns)
-- [ ] Capture thermal data (outflow < 28°C anomaly) during defrost
-- [ ] Correlate byte 12 changes with thermal lag patterns
+- [x] **Byte 14 = 0x02 = DEFROST flag** (confirmed 2025-12-22)
+- [x] Byte 12 shows RUN → START transition during defrost (unusual, normally goes through IDLE)
+- [x] Defrost duration: ~7-10 minutes per cycle
+- [x] Cycle frequency: ~1 hour at -2°C outside temperature
 
 ### Power Formula (COMPLETED)
 - [x] Determine why CN-CNT reports 34 when actual power is 7W → Baseline constant, not real measurement
@@ -634,7 +651,8 @@ Controller                               AC Unit
   - RUN (Normal/Quiet): +2 to +4
   - IDLE (Normal/Quiet): +2 to +6 (elevated after RUN, settles in ~1 min)
   - Powerful: +4 to +8
-- [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor) - needs defrost verification
+- [x] Byte 12 bit meanings (bit 6 = ON, bit 3 = fan, bit 2 = compressor)
+- [x] **Byte 14 = DEFROST flag** (0x00=normal, 0x02=defrost) - confirmed 2025-12-22
 - [x] Startup timing corrected (15-20 sec, not 3 min)
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
 - [x] Byte 18 = inlet temperature (confirmed via Zigbee)
@@ -651,7 +669,7 @@ Controller                               AC Unit
 1. ~~Why does CN-CNT report 34 when actual power is 7W?~~ → **ANSWERED**: Baseline constant, not real measurement
 2. ~~What's in the multiplexed bytes (31-33)?~~ → **ANSWERED**: Static identifiers, not dynamic data
 3. ~~Byte 30 exact meaning?~~ → **ANSWERED**: Compressor current × 5 (validated R²=0.9948)
-4. What byte 12 value during defrost? Prediction: 0x44 (compressor on, fan off) or 0x50/0x54
+4. ~~What byte 12 value during defrost?~~ → **ANSWERED**: Byte 14 = 0x02 is defrost flag, byte 12 stays 0x4C/0x48
 5. What do the static identifiers (31-33) represent? Model code? Serial? Firmware version?
 
 ---
