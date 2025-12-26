@@ -166,8 +166,8 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 13   | 0x2A-2C | Temp offset (target +2 to +4 when ON, =target when OFF) | ✅ Confirmed |
 | 14   | 0x00/02 | **Defrost flag** (0x00=normal, 0x02=defrost) | ✅ Confirmed |
 | 15   | 0x00    | Reserved (always 0x00)           | ✅ Static   |
-| 16   | 0x00/30 | WiFi module firmware? (XKE fw 02.07.00=0x00, ZKE fw 20.04.08=0x30) | ❓ Unknown |
-| 17   | 0x00/93 | WiFi module firmware? (XKE fw 02.07.00=0x00, ZKE fw 20.04.08=0x93) | ❓ Unknown |
+| 16   | 0x00/30 | Model-specific (XKE=0x00, ZKE=0x30) | ❓ Unknown |
+| 17   | 0x00/93 | Model-specific (XKE=0x00, ZKE=0x93) | ❓ Unknown |
 | 18   | 0x17    | Current/room temperature         | ✅ Confirmed (via Zigbee sensor at inlet) |
 | 19   | 0x03    | Outside temperature              | ✅ Confirmed (via Panasonic app) |
 | 20   | 0x1F    | Humidity %                       | ✅ Confirmed (via Zigbee sensor) |
