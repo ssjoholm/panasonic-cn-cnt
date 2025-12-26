@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 2.1     | 2025-12-26 | -      | Added CS-HZ35ZKE patterns: bytes 16-17 model-specific (unknown purpose), MUX slot 1/3 identifiers |
 | 2.0     | 2025-12-22 | -      | **MAJOR**: Remote testing - Fan modes confirmed (Auto/Quiet/Powerful use b5=0xA0 + b7 flags), B13 offset correlates with outside temp (r=-0.71), Sleep timer not visible |
 | 1.9     | 2025-12-22 | -      | B13 offset for RUN expanded to +2 to +6 (same as IDLE), Auto fan = 0xA0 confirmed |
 | 1.8     | 2025-12-22 | -      | **DEFROST DETECTED**: Byte 14 = 0x02 during defrost, RUN→START transition |
