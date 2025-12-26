@@ -197,8 +197,8 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 0x80 | 0x52 | 0x01 | 1    | Model/unit identifier (static) - CS-HZ35ZKE |
 | 0xC0 | 0x00 | 0x00 | 2    | Status: NanoE-X **OFF** |
 | 0xC0 | 0x04 | 0x00 | 2    | Status: NanoE-X **ON** |
-| 0xC1 | 0x44 | 0x15 | 3    | Version/config identifier (static) - CS-HZ35XKE |
-| 0xC1 | 0x47 | 0x17 | 3    | Version/config identifier (static) - CS-HZ35ZKE |
+| 0xC1 | 0x44 | 0x15 | 3    | Version/config identifier (static) - CS-HZ35XKE (fw 02.07.00) |
+| 0xC1 | 0x47 | 0x17 | 3    | Version/config identifier (static) - CS-HZ35ZKE (fw 20.04.08) |
 
 **Slot 2 Discovery (2025-12-16):**
 - Middle byte (b32) changes based on NanoE-X setting
