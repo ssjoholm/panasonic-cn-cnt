@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 2.2     | 2026-01-05 | -      | **CORRECTED**: Byte 21 is indoor coil/piping temp (NOT room temp display) - useful for defrost analysis |
 | 2.1     | 2025-12-26 | -      | Added CS-HZ35ZKE patterns: bytes 16-17 model-specific (unknown purpose), MUX slot 1/3 identifiers |
 | 2.0     | 2025-12-22 | -      | **MAJOR**: Remote testing - Fan modes confirmed (Auto/Quiet/Powerful use b5=0xA0 + b7 flags), B13 offset correlates with outside temp (r=-0.71), Sleep timer not visible |
 | 1.9     | 2025-12-22 | -      | B13 offset for RUN expanded to +2 to +6 (same as IDLE), Auto fan = 0xA0 confirmed |
@@ -172,7 +173,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 18   | 0x17    | Current/room temperature         | ✅ Confirmed (via Zigbee sensor at inlet) |
 | 19   | 0x03    | Outside temperature              | ✅ Confirmed (via Panasonic app) |
 | 20   | 0x1F    | Humidity %                       | ✅ Confirmed (via Zigbee sensor) |
-| 21   | 0x16    | Room temp display (≈ b18, ±1°C)  | ✅ Confirmed |
+| 21   | 0x16    | Indoor coil/piping temperature   | ✅ Confirmed |
 | 22   | 0x03    | Outside temperature (alt)        | ✅ Confirmed |
 | 23   | 0xFF    | Marker                           | ✅ Known    |
 | 24   | 0x80    | Reserved/unsupported (always 0x80)| ✅ Static   |
@@ -528,13 +529,13 @@ This confirms byte 13 is the "internal setting temperature" used by the control 
 | 18   | Current/room temperature   | Sensor at AC air intake   | ✅ Confirmed (via Zigbee sensor) |
 | 19   | Outside temperature        | Signed int8, °C           | ✅ Confirmed (via Panasonic app) |
 | 20   | Humidity %                 | Sensor at AC air intake   | ✅ Confirmed (via Zigbee sensor) |
-| 21   | Room temperature (display) | ≈ Byte 18 (same sensor, ±1°C variance) | ✅ Confirmed |
+| 21   | Indoor coil/piping temp    | Heat exchanger temperature (between intake b18 and outflow) | ✅ Confirmed |
 | 22   | Outside temp (alternate)   | Same as byte 19           | ✅ Confirmed |
 
 - Value `0x80` = Unsupported/unavailable
 - Values > 100 considered out of range
 
-**Note**: Byte 18 confirmed via external Zigbee sensor at AC intake - values match within 0.5°C. Panasonic calls this "room temperature" as it's the only internal air sensor. Byte 20 (humidity) also confirmed via Zigbee sensor - matches within 0.5%. Byte 21 appears to be the same sensor as byte 18 with minor variance (±1°C) - likely due to timing or rounding differences, not a fixed offset.
+**Note**: Byte 18 confirmed via external Zigbee sensor at AC intake - values match within 0.5°C. Panasonic calls this "room temperature" as it's the only internal air sensor. Byte 20 (humidity) also confirmed via Zigbee sensor - matches within 0.5%. Byte 21 is the indoor coil/piping temperature - the heat exchanger sits between inlet air (b18) and outlet air, so b21 value is typically between intake temp and outflow temp. Useful for defrost analysis: when outdoor coil ices up, indoor coil temp (b21) may drop as an early indicator.
 
 ### Thermal Baseline Data (Heating Mode)
 
@@ -722,7 +723,7 @@ Controller                               AC Unit
 - [x] 0x44 state is intermittent (~50% capture rate at 5s polling)
 - [x] Byte 18 = inlet temperature (confirmed via Zigbee)
 - [x] Byte 20 = humidity (confirmed via Zigbee)
-- [x] Byte 21 ≈ byte 18 (same sensor, ±1°C variance)
+- [x] Byte 21 = indoor coil/piping temperature (heat exchanger, between intake and outflow)
 - [x] **Bytes 31-33 = static identifiers** (NOT telemetry - same values in all states)
 - [x] Thermal baselines documented (running: 35-37°C outflow, stopped: ~30°C)
 - [x] **Power formula validated** (R²=0.9943): `total_watts = (b28 + b29×256) × 1.10`
