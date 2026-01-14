@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 2.3     | 2026-01-14 | -      | Added CS-HZ25XKE (2.5kW) MUX pattern. Clarified slot purpose: Slot 1 = unit/capacity, Slot 3 = series (XKE vs ZKE) |
 | 2.2     | 2026-01-05 | -      | **CORRECTED**: Byte 21 is indoor coil/piping temp (NOT room temp display) - useful for defrost analysis |
 | 2.1     | 2025-12-26 | -      | Added CS-HZ35ZKE patterns: bytes 16-17 model-specific (unknown purpose), MUX slot 1/3 identifiers |
 | 2.0     | 2025-12-22 | -      | **MAJOR**: Remote testing - Fan modes confirmed (Auto/Quiet/Powerful use b5=0xA0 + b7 flags), B13 offset correlates with outside temp (r=-0.71), Sleep timer not visible |
@@ -195,12 +196,13 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 **Observed Patterns:**
 | b31  | b32  | b33  | Slot | Interpretation |
 |------|------|------|------|----------------|
-| 0x80 | 0x19 | 0x83 | 1    | Model/unit identifier (static) - CS-HZ35XKE |
-| 0x80 | 0x52 | 0x01 | 1    | Model/unit identifier (static) - CS-HZ35ZKE |
+| 0x80 | 0x18 | 0x83 | 1    | Model/unit identifier (static) - CS-HZ25XKE (2.5kW) |
+| 0x80 | 0x19 | 0x83 | 1    | Model/unit identifier (static) - CS-HZ35XKE (3.5kW) |
+| 0x80 | 0x52 | 0x01 | 1    | Model/unit identifier (static) - CS-HZ35ZKE (3.5kW) |
 | 0xC0 | 0x00 | 0x00 | 2    | Status: NanoE-X **OFF** |
 | 0xC0 | 0x04 | 0x00 | 2    | Status: NanoE-X **ON** |
-| 0xC1 | 0x44 | 0x15 | 3    | Version/config identifier (static) - CS-HZ35XKE |
-| 0xC1 | 0x47 | 0x17 | 3    | Version/config identifier (static) - CS-HZ35ZKE |
+| 0xC1 | 0x44 | 0x15 | 3    | Series identifier (static) - XKE platform |
+| 0xC1 | 0x47 | 0x17 | 3    | Series identifier (static) - ZKE platform |
 
 **Slot 2 Discovery (2025-12-16):**
 - Middle byte (b32) changes based on NanoE-X setting
@@ -209,10 +211,14 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 - ✅ **Tested:** Powerful and Quiet modes do NOT appear in Slot 2 (only in byte 7)
 
 **Slot Purpose:**
-- Slot 1 (0x80): Unit identification (static)
-- Slot 2 (0xC0): Feature status (dynamic)
-- Slot 3 (0xC1): Version/config (static)
+- Slot 1 (0x80): Unit/capacity identification (static) - varies by model size
+- Slot 2 (0xC0): Feature status (dynamic) - NanoE-X on/off
+- Slot 3 (0xC1): Series/platform identification (static) - XKE vs ZKE
 - NOT: compressor Hz, fan RPM, or any dynamic sensor data
+
+**Model Series Pattern:**
+- XKE series (HZ25XKE, HZ35XKE): Slot 3 = 0x44/0x15
+- ZKE series (HZ35ZKE): Slot 3 = 0x47/0x17
 
 ✅ Confirmed static via 24h analysis across all operational states (2025-12-13)
 
