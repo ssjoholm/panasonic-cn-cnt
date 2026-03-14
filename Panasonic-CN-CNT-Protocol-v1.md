@@ -2,6 +2,8 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 2.5     | 2026-03-14 | -      | **NEW**: Byte 1 payload length variant 0x22 (34 bytes) observed — non-standard packet, causes byte position shift. Panaserver validation added |
+| 2.4     | 2026-03-14 | -      | **NEW STATE 0x08** discovered via anomaly watchdog: fan active without ON flag (bit 3=1, bit 6=0). Possibly self-clean or post-shutdown ventilation |
 | 2.3     | 2026-01-14 | -      | Added CS-HZ25XKE (2.5kW) MUX pattern. Clarified slot purpose: Slot 1 = unit/capacity, Slot 3 = series (XKE vs ZKE) |
 | 2.2     | 2026-01-05 | -      | **CORRECTED**: Byte 21 is indoor coil/piping temp (NOT room temp display) - useful for defrost analysis |
 | 2.1     | 2025-12-26 | -      | Added CS-HZ35ZKE patterns: bytes 16-17 model-specific (unknown purpose), MUX slot 1/3 identifiers |
@@ -154,7 +156,7 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | Byte | Example | Purpose                          | Status      |
 |------|---------|----------------------------------|-------------|
 | 0    | 0x70    | Header                           | ✅ Confirmed |
-| 1    | 0x20    | Payload length (32)              | ✅ Confirmed |
+| 1    | 0x20    | Payload length (normally 32)     | ⚠️ See note  |
 | 2    | 0x44    | Mode + Power                     | ✅ Confirmed (via Sensibo/IR) |
 | 3    | 0x28    | Target temperature × 2           | ✅ Confirmed (via Sensibo/IR) |
 | 4    | 0x80    | Mild dry                         | ✅ Known    |
@@ -188,6 +190,20 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 32   | 0x19/00/44 | Static identifier data          | ✅ See below |
 | 33   | 0x83/00/15 | Static identifier data          | ✅ See below |
 | 34   | 0x??    | Checksum                         | ✅ Confirmed |
+
+### Byte 1: Payload Length Variant (NEW v2.5)
+
+> ⚠️ **ANOMALY (2026-03-09, Livingroom)**: Byte 1 observed as **0x22 (34)** instead of the expected 0x20 (32). This changes the total packet size from 35 to 37 bytes.
+>
+> When byte 1 ≠ 0x20, all byte positions after byte 1 may be shifted, making decoded values unreliable. The same packet showed:
+> - Invalid humidity: byte 20 read as 158% (0x9E)
+> - These are almost certainly misaligned reads due to the different payload length
+>
+> **Impact on decoders**: Any code parsing CN-CNT packets MUST validate that byte 1 == 0x20 before trusting byte positions. If byte 1 differs, the packet should be logged for analysis but not decoded using standard byte offsets.
+>
+> Raw packet: `7022402880305c100040000000280000000016089e1608ff8080ff800f0000c00000ed`
+>
+> Only observed once. Cause unknown — could be a communication glitch, a different packet type from the AC unit, or a firmware-level anomaly.
 
 ### Bytes 31-33: Multiplexed Status/Identifiers
 
@@ -451,6 +467,7 @@ This confirms byte 13 is the "internal setting temperature" used by the control 
 |-------|-------------|--------------------------|--------|
 | 0x00  | 0000 0000   | **OFF** (unit powered off via mode) | ✅ Confirmed |
 | 0x04  | 0000 0100   | **Power-down transition** | ✅ Confirmed (v1.2) |
+| 0x08  | 0000 1000   | **Fan-only (unit OFF)** — fan running without ON state | ⚠️ New (v2.4) |
 | 0x40  | 0100 0000   | Idle (ON but waiting)    | ✅ Confirmed |
 | 0x44  | 0100 0100   | Shutdown transition      | ⚠️ Intermittent (see note) |
 | 0x48  | 0100 1000   | Startup (fan pre-heat)   | ✅ Confirmed |
@@ -523,6 +540,15 @@ This confirms byte 13 is the "internal setting temperature" used by the control 
 ✅ State 0x00 (OFF) discovered via live testing with mode change (2025-12-13)
 ✅ State 0x04 (power-down) discovered via anomaly watchdog (2025-12-14)
 ⚠️ States 0x04 and 0x44 are brief transitions - may be missed at 5s polling
+⚠️ **State 0x08** discovered via anomaly watchdog (2026-01-16, Kitchen at 04:54 AM)
+
+> **NEW DISCOVERY (v2.4)**: State 0x08 = bit 3 set (fan active), bit 6 clear (unit not in ON state). This means the fan is running but the unit is not in its normal ON operating mode. Possible interpretations:
+> - Post-shutdown ventilation/drying cycle (internal mold prevention)
+> - Self-cleaning mode
+> - Brief transient during power-up
+>
+> Only observed once. Occurred at 04:54 AM suggesting an automatic maintenance cycle. The unit was Kitchen (CS-HZ35ZKE).
+> Raw packet: `702004268030560000400000082a0000309311021e1102ff8080ff80280001c1471701`
 
 > ⚠️ **UNCONFIRMED - Defrost Theory**: Other bit patterns (e.g., 0x50, 0x54) may indicate defrost/deicing mode. Prediction: defrost may show 0x44 (compressor on, fan off) or a new value. Defrost cycles have not been observed yet - needs cold weather testing.
 
@@ -714,7 +740,7 @@ Controller                               AC Unit
 - [ ] Swing command - untested
 
 ### Completed Investigations
-- [x] Byte 12 state machine (**6 states**: 0x00, 0x04, 0x40, 0x44, 0x48, 0x4C)
+- [x] Byte 12 state machine (**7 states**: 0x00, 0x04, 0x08, 0x40, 0x44, 0x48, 0x4C)
 - [x] **0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
 - [x] **0x04 = Power-down transition** (RUN → 0x04 → OFF) - discovered via anomaly watchdog
 - [x] **Byte 13 behavior**: varies by mode and state:
