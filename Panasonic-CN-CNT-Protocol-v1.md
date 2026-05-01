@@ -2,6 +2,7 @@
 
 | Version | Date       | Author | Changes                                      |
 |---------|------------|--------|----------------------------------------------|
+| 2.6     | 2026-05-01 | -      | **COOL MODE STATES** discovered via anomaly watchdog when cooling first activated on Upstairs: 0x30 (COOL_IDLE), 0x34 (COOL_TRANS), 0x38 (COOL_START), 0x3C (COOL_RUN). Bits 5+4 (0x30) = cool mode ON flag, mirroring bit 6 (0x40) for heat mode. Lower bits (fan/compressor) follow same pattern as heat states |
 | 2.5     | 2026-03-14 | -      | **NEW**: Byte 1 payload length variant 0x22 (34 bytes) observed — non-standard packet, causes byte position shift. Panaserver validation added |
 | 2.4     | 2026-03-14 | -      | **NEW STATE 0x08** discovered via anomaly watchdog: fan active without ON flag (bit 3=1, bit 6=0). Possibly self-clean or post-shutdown ventilation |
 | 2.3     | 2026-01-14 | -      | Added CS-HZ25XKE (2.5kW) MUX pattern. Clarified slot purpose: Slot 1 = unit/capacity, Slot 3 = series (XKE vs ZKE) |
@@ -468,10 +469,14 @@ This confirms byte 13 is the "internal setting temperature" used by the control 
 | 0x00  | 0000 0000   | **OFF** (unit powered off via mode) | ✅ Confirmed |
 | 0x04  | 0000 0100   | **Power-down transition** | ✅ Confirmed (v1.2) |
 | 0x08  | 0000 1000   | **Fan-only (unit OFF)** — fan running without ON state | ⚠️ New (v2.4) |
-| 0x40  | 0100 0000   | Idle (ON but waiting)    | ✅ Confirmed |
-| 0x44  | 0100 0100   | Shutdown transition      | ⚠️ Intermittent (see note) |
-| 0x48  | 0100 1000   | Startup (fan pre-heat)   | ✅ Confirmed |
-| 0x4C  | 0100 1100   | Running (full operation) | ✅ Confirmed |
+| 0x30  | 0011 0000   | **Cool: Idle** (cool mode ON, waiting) | ✅ Confirmed (v2.6) |
+| 0x34  | 0011 0100   | **Cool: Transition** (shutdown/startup) | ✅ Confirmed (v2.6) |
+| 0x38  | 0011 1000   | **Cool: Start** (fan pre-cool) | ✅ Confirmed (v2.6) |
+| 0x3C  | 0011 1100   | **Cool: Running** (full cooling) | ✅ Confirmed (v2.6) |
+| 0x40  | 0100 0000   | Heat: Idle (ON but waiting) | ✅ Confirmed |
+| 0x44  | 0100 0100   | Heat: Shutdown transition | ⚠️ Intermittent (see note) |
+| 0x48  | 0100 1000   | Heat: Startup (fan pre-heat) | ✅ Confirmed |
+| 0x4C  | 0100 1100   | Heat: Running (full operation) | ✅ Confirmed |
 
 > ✅ **NEW DISCOVERY (v1.2)**: State 0x04 is a brief power-down transition when turning OFF from RUN. Sequence: RUN (0x4C) → 0x04 → OFF (0x00). This is distinct from 0x44 (which transitions to IDLE, not OFF).
 
@@ -479,28 +484,47 @@ This confirms byte 13 is the "internal setting temperature" used by the control 
 
 **Bit Layout:**
 ```
-0x4C = 0100 1100 - Running (fan + compressor)
-0x48 = 0100 1000 - Startup (fan only, pre-compressor)
-0x44 = 0100 0100 - Shutdown transition (to IDLE)
-0x40 = 0100 0000 - Idle (ON but waiting)
+HEAT MODE (bit 6 = heat ON flag):
+0x4C = 0100 1100 - Heat: Running (fan + compressor)
+0x48 = 0100 1000 - Heat: Startup (fan only, pre-compressor)
+0x44 = 0100 0100 - Heat: Shutdown transition (to IDLE)
+0x40 = 0100 0000 - Heat: Idle (ON but waiting)
+
+COOL MODE (bits 5+4 = cool ON flag):
+0x3C = 0011 1100 - Cool: Running (fan + compressor)
+0x38 = 0011 1000 - Cool: Start (fan pre-cool)
+0x34 = 0011 0100 - Cool: Transition
+0x30 = 0011 0000 - Cool: Idle (ON but waiting)
+
+COMMON:
+0x08 = 0000 1000 - Fan-only (unit OFF)
 0x04 = 0000 0100 - Power-down transition (to OFF)
 0x00 = 0000 0000 - OFF (unit disabled via mode)
+
        ││││ ││││
        ││││ │└┴┴─ Bits 0-2: (always 0 in observed states)
        ││││ └──── Bit 3 (0x08): Fan active
        │││└────── Bit 2 (0x04): Compressor active
-       │└┴─────── Bits 4-6: State active flag (010 when ON)
-       └───────── Bit 7: (always 0)
+       ││└─────── Bit 4 (0x10): Cool mode ON (with bit 5)
+       │└──────── Bit 5 (0x20): Cool mode ON (with bit 4)
+       └───────── Bit 6 (0x40): Heat mode ON
+```
+
+> ✅ **NEW DISCOVERY (v2.6)**: Cool mode uses bits 5+4 (0x30) as the ON flag, while heat mode uses bit 6 (0x40). The lower bits (fan=bit 3, compressor=bit 2) follow the same pattern in both modes. Discovered 2026-05-01 when cooling was first activated via TMA automation on Upstairs unit.
 ```
 
 **Bit Interpretation:**
-| State | Bit 6 | Bit 3 | Bit 2 | Observed Context |
-|-------|-------|-------|-------|------------------|
-| 0x00  | 0     | 0     | 0     | Unit OFF (via mode change) |
-| 0x40  | 1     | 0     | 0     | Idle (ON but waiting) |
-| 0x48  | 1     | 1     | 0     | Startup (fan pre-heat before compressor) |
-| 0x4C  | 1     | 1     | 1     | Running (full operation) |
-| 0x44  | 1     | 0     | 1     | Shutdown transition (brief, ~5 sec) |
+| State | Bit 6 (heat) | Bit 5+4 (cool) | Bit 3 (fan) | Bit 2 (comp) | Context |
+|-------|-------------|----------------|-------------|-------------|---------|
+| 0x00  | 0           | 00             | 0           | 0           | OFF |
+| 0x30  | 0           | 11             | 0           | 0           | Cool: Idle |
+| 0x34  | 0           | 11             | 0           | 1           | Cool: Transition |
+| 0x38  | 0           | 11             | 1           | 0           | Cool: Start (fan only) |
+| 0x3C  | 0           | 11             | 1           | 1           | Cool: Running |
+| 0x40  | 1           | 00             | 0           | 0           | Heat: Idle |
+| 0x44  | 1           | 00             | 0           | 1           | Heat: Transition |
+| 0x48  | 1           | 00             | 1           | 0           | Heat: Start (fan only) |
+| 0x4C  | 1           | 00             | 1           | 1           | Heat: Running |
 
 > ⚠️ **BIT MEANINGS UNCERTAIN**: The 0x44 state shows bit 3=0, bit 2=1. If bit 3=fan and bit 2=compressor, this would mean "fan off, compressor on" — but physically during normal shutdown, compressor stops first while fan runs to dissipate heat. Possible explanations:
 > - Bit meanings may be swapped (bit 3=compressor, bit 2=fan)
@@ -540,6 +564,7 @@ This confirms byte 13 is the "internal setting temperature" used by the control 
 ✅ State 0x00 (OFF) discovered via live testing with mode change (2025-12-13)
 ✅ State 0x04 (power-down) discovered via anomaly watchdog (2025-12-14)
 ⚠️ States 0x04 and 0x44 are brief transitions - may be missed at 5s polling
+✅ States 0x30, 0x34, 0x38, 0x3C (cool mode) discovered via anomaly watchdog (2026-05-01, Upstairs first cooling activation)
 ⚠️ **State 0x08** discovered via anomaly watchdog (2026-01-16, Kitchen at 04:54 AM)
 
 > **NEW DISCOVERY (v2.4)**: State 0x08 = bit 3 set (fan active), bit 6 clear (unit not in ON state). This means the fan is running but the unit is not in its normal ON operating mode. Possible interpretations:
@@ -740,7 +765,7 @@ Controller                               AC Unit
 - [ ] Swing command - untested
 
 ### Completed Investigations
-- [x] Byte 12 state machine (**7 states**: 0x00, 0x04, 0x08, 0x40, 0x44, 0x48, 0x4C)
+- [x] Byte 12 state machine (**11 states**: 0x00, 0x04, 0x08, 0x30, 0x34, 0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C)
 - [x] **0x00 = OFF state** (distinct from 0x40 idle) - confirmed via live testing
 - [x] **0x04 = Power-down transition** (RUN → 0x04 → OFF) - discovered via anomaly watchdog
 - [x] **Byte 13 behavior**: varies by mode and state:
