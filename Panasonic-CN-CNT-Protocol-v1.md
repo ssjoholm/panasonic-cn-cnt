@@ -220,6 +220,8 @@ RX: 70 20 44 29 80 30 5C 00 00 40 00 00 4C 2C ... (35 bytes)
 | 0xC0 | 0x04 | 0x00 | 2    | Status: NanoE-X **ON** |
 | 0xC1 | 0x44 | 0x15 | 3    | Series identifier (static) - XKE platform |
 | 0xC1 | 0x47 | 0x17 | 3    | Series identifier (static) - ZKE platform |
+| 0x80 | 0x53 | 0x01 | 1    | Model/unit identifier (static) - CS-CZ25ZKE (2.5kW), reported 2026-08-31 - very close to the CS-HZ35ZKE row above (b32 differs by 1) |
+| 0x00 | 0x00 | 0x00 | -    | **No slot mechanism** - CS-LZ25TKE (older unit), reported 2026-08-31. Stable across 5+ consecutive packets while every other byte varied normally, so not a misread. Looks like this unit doesn't implement the multiplexed-slot feature at all rather than using an undocumented 4th slot. |
 
 **Slot 2 Discovery (2025-12-16):**
 - Middle byte (b32) changes based on NanoE-X setting
@@ -594,6 +596,8 @@ COMMON:
 
 **Note**: Byte 18 confirmed via external Zigbee sensor at AC intake - values match within 0.5°C. Panasonic calls this "room temperature" as it's the only internal air sensor. Byte 20 (humidity) also confirmed via Zigbee sensor - matches within 0.5%. Byte 21 is the indoor coil/piping temperature - the heat exchanger sits between inlet air (b18) and outlet air, so b21 value is typically between intake temp and outflow temp. Useful for defrost analysis: when outdoor coil ices up, indoor coil temp (b21) may drop as an early indicator.
 
+> ⚠️ **Model-dependent (reported 2026-08-31)**: On two real CS-LZ25TKE / CS-CZ25ZKE units, byte 20 reads a constant `0xFF` regardless of state - not a valid humidity percentage. Likely these units simply have no humidity sensor and `0xFF` is a not-populated marker (matches DomiStyle's own protocol notes, which label this byte "Marker" rather than humidity). Worth treating `0xFF` as "unsupported" for byte 20, similar to how `0x80` is already treated elsewhere.
+
 ### Thermal Baseline Data (Heating Mode)
 
 > ⚠️ **Baseline for Defrost Detection**: The following thermal data may help identify defrost cycles when they occur.
@@ -802,6 +806,7 @@ Controller                               AC Unit
 3. ~~Byte 30 exact meaning?~~ → **ANSWERED**: Compressor current × 5 (validated R²=0.9948)
 4. ~~What byte 12 value during defrost?~~ → **ANSWERED**: Byte 14 = 0x02 is defrost flag, byte 12 stays 0x4C/0x48
 5. What do the static identifiers (31-33) represent? Model code? Serial? Firmware version?
+6. **Fault/error codes on CNT?** On the WLAN protocol (DNSK-P11), the AC's error code is directly readable as ASCII in the 0x89 response (e.g. "H099" - evaporator frost from clogged filters, confirmed against a real fault). No CNT equivalent identified yet despite looking - the AC clearly tracks/reports fault codes on WLAN, so it's presumably somewhere in the CNT byte stream too, just not caught yet. If anyone has raw CNT packets from a real fault condition, that'd help narrow it down.
 
 ---
 
